@@ -94,6 +94,8 @@ h1 { font-size: 18px; margin: 0; letter-spacing: .02em; white-space: nowrap; ove
 .card.warn { background: var(--warn-soft); border-color: var(--warn); }
 .card.warn h2 { color: var(--warn); }
 .card.warn p { margin: 0 0 6px; font-size: 14px; }
+.card.info p { margin: 0; font-size: 13px; color: var(--sub); }
+.card.info p + p { margin-top: 6px; }
 .note, .hint { font-size: 12px; color: var(--muted); }
 .hint { margin: 8px 0 0; }
 .muted { color: var(--muted); font-size: 14px; margin: 0; }

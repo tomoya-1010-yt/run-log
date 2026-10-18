@@ -307,8 +307,9 @@ async function renderRun(id) {
     ? `<div class="card warn"><h2>要確認</h2><ul class="flags">${r.flags.map((f) => `<li>${esc(f.text)}</li>`).join("")}</ul>
         <p>おかしいと思ったら、下の「集計から外す」をオンにしてください。目標・グラフ・AI の分析に含めなくなります。</p></div>`
     : "";
+  const notes = r.notes?.length ? `<div class="card info">${r.notes.map((n) => `<p>${esc(n)}</p>`).join("")}</div>` : "";
   main.innerHTML = `<div class="map" id="map"></div>
-    ${flags}
+    ${flags}${notes}
     <div class="tiles">
       ${tile("距離", fmtKm(r.distance_km, 2), "km")}
       ${tile("ペース", fmtPace(r.pace_s), "/km")}

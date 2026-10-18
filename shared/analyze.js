@@ -9,6 +9,8 @@ export const MAX_ACCURACY = 50;      // m。位置の誤差がこれより大き
 const FAST_FLAG_SEC = 30;            // 時速 25km 超の区間がこれ以上あれば「要確認」
 const GAP_FLAG_SEC = 300;            // GPS がこれ以上途切れていれば「要確認」
 const LOW_HR = 115;                  // 平均心拍がこれ未満なら「要確認」
+export const LONG_PAUSE_SEC = 30 * 60; // これ以上の一時停止のあと再開していたら、一時停止した時点でランが終わったとみなす
+const PAUSE_SLACK_SEC = 60;          // 一時停止の前後の GPS の点のずれ
 
 // "2026-10-18 18:58:15 +0900" → Date のミリ秒
 export function parseTime(s) {
@@ -61,15 +63,65 @@ function routePoints(w, t0) {
   return pts;
 }
 
-// 止まっていた時間・乗り物らしい区間・GPS の途切れを数える
-function movement(pts) {
+// 一時停止の記録から、短い一時停止の区間 [始まり秒, 終わり秒] と、ランが実際に終わった時点を出す。
+// 一時停止したまま終了し忘れ、翌日などに再開・終了したワークアウトは、一時停止した時点 (cut) で区切る
+function pausesOf(w, t0) {
+  const end = Math.round((parseTime(w.end) - t0) / 1000);
+  const ev = (Array.isArray(w.events) ? w.events : [])
+    .filter((e) => e.type === "pause" || e.type === "resume")
+    .map((e) => ({ type: e.type, t: Math.round((parseTime(e.start) - t0) / 1000) }))
+    .filter((e) => Number.isFinite(e.t))
+    .sort((a, b) => a.t - b.t);
+  const pauses = [];
+  for (let i = 0; i < ev.length; i++) {
+    if (ev[i].type !== "pause") continue;
+    const resume = ev.slice(i + 1).find((e) => e.type === "resume");
+    if (!resume) { // 最後の一時停止。そのまま長い時間がたってから終了していれば区切る
+      if (Number.isFinite(end) && end - ev[i].t >= LONG_PAUSE_SEC) return { pauses, cut: ev[i].t, resumed: end };
+      break;
+    }
+    if (resume.t - ev[i].t >= LONG_PAUSE_SEC) return { pauses, cut: ev[i].t, resumed: resume.t };
+    pauses.push([ev[i].t, resume.t]);
+  }
+  return { pauses, cut: null, resumed: null };
+}
+
+// 1分ごとの記録 (距離・消費エネルギー・歩数) のうち、cut 秒より前の分の合計 (記録がなければ null)
+function sumBefore(list, t0, cut, value) {
+  let total = 0, n = 0;
+  for (const x of Array.isArray(list) ? list : []) {
+    const t = (parseTime(x.date) - t0) / 1000;
+    const v = value(x);
+    if (Number.isFinite(t) && t < cut && Number.isFinite(v)) { total += v; n++; }
+  }
+  return n ? total : null;
+}
+
+const toKcal = (v) => {
+  const q = qty(v);
+  return Number.isFinite(q) ? (String(v?.units || "").toLowerCase() === "kj" ? q / 4.184 : q) : null;
+};
+
+// ルートの標高から獲得標高を出す (3m 未満の上下はぶれとして無視。標高 0 は記録なしとして飛ばす)
+function climb(pts) {
+  let up = 0, base = null;
+  for (const p of pts) {
+    if (!p[3]) continue;
+    if (base === null || p[3] < base) base = p[3];
+    else if (p[3] - base >= 3) { up += p[3] - base; base = p[3]; }
+  }
+  return up;
+}
+
+// 止まっていた時間・乗り物らしい区間・GPS の途切れを数える (一時停止中の途切れは数えない)
+function movement(pts, pauses = []) {
   let moving = 0, fast = 0, fastKm = 0, maxGap = 0, gpsKm = 0;
   for (let i = 1; i < pts.length; i++) {
     const [t1, la1, lo1] = pts[i - 1];
     const [t2, la2, lo2, , spd] = pts[i];
     const dt = t2 - t1;
     if (dt <= 0) continue;
-    maxGap = Math.max(maxGap, dt);
+    if (!pauses.some(([a, b]) => t1 >= a - PAUSE_SLACK_SEC && t2 <= b + PAUSE_SLACK_SEC)) maxGap = Math.max(maxGap, dt);
     const d = haversine(la1, lo1, la2, lo2);
     if (dt > GAP_SEC) continue;
     const v = spd ?? d / dt; // 端末が測った速度があればそちらを使う (GPS のぶれに強い)
@@ -80,16 +132,26 @@ function movement(pts) {
   return { moving, fast, fastKm, maxGap, gpsKm };
 }
 
-// 1km ごとのペース。Apple が計算したもの (フィットネスアプリと同じ数字) を優先し、なければルートから出す
-function splitsOf(w, pts) {
+// 1km ごとのペース。Apple が計算したもの (フィットネスアプリと同じ数字) を優先し、なければルートから出す。
+// cut (ランが終わった時点) があれば、そこまでに終わった区間と、残りの端数だけにする
+function splitsOf(w, pts, t0, cut, distance) {
   const s = (Array.isArray(w.splits) ? w.splits : [])
     .find((x) => x.distanceType === "walkingRunning" && qty(x.targetDistance) === 1 && /^k/i.test(x.targetDistance?.units || "km"));
   if (s?.items?.length) {
-    return s.items.map((x) => ({
+    const items = cut === null ? s.items : s.items.filter((x) => (parseTime(x.end) - t0) / 1000 <= cut + 1);
+    const out = items.map((x) => ({
       km: round(qty(x.metrics?.distance) / (/^k/i.test(x.metrics?.distance?.units || "m") ? 1 : 1000), 3),
       sec: round(Number(x.elapsedDuration ?? x.activeDuration)),
       hr: round(qty(x.metrics?.heartRateAverage)),
     })).filter((x) => x.km > 0 && x.sec > 0);
+    if (cut !== null) {
+      const rest = distance - out.reduce((a, x) => a + x.km, 0);
+      const lastEnd = items.length ? (parseTime(items[items.length - 1].end) - t0) / 1000 : 0;
+      // 1分ごとの記録から出した端数なので、ありえない速さになるときは出さない
+      if (rest >= 0.05 && cut > lastEnd && (rest * 1000) / (cut - lastEnd) <= MAX_SPEED)
+        out.push({ km: round(rest, 3), sec: round(cut - lastEnd), hr: null });
+    }
+    return out;
   }
   const out = [];
   let dist = 0, lastT = pts[0]?.[0] ?? 0, lastD = 0;
@@ -109,10 +171,13 @@ function splitsOf(w, pts) {
   return out;
 }
 
-// 1分ごとの平均心拍 → [開始からの分, 平均]
-function hrSeries(w, t0) {
+const hrAvg = (x) => Number(x.Avg ?? x.avg ?? x.qty);
+
+// 1分ごとの平均心拍 → [開始からの分, 平均] (cut があればそれより前だけ)
+function hrSeries(w, t0, cut) {
   return (Array.isArray(w.heartRateData) ? w.heartRateData : [])
-    .map((x) => [Math.round((parseTime(x.date) - t0) / 60000), round(Number(x.Avg ?? x.avg ?? x.qty))])
+    .filter((x) => cut === null || (parseTime(x.date) - t0) / 1000 < cut)
+    .map((x) => [Math.round((parseTime(x.date) - t0) / 60000), round(hrAvg(x))])
     .filter(([m, v]) => Number.isFinite(m) && m >= 0 && v > 0);
 }
 
@@ -133,6 +198,7 @@ function compactRoute(pts) {
 }
 
 const minutes = (s) => Math.round(s / 60);
+const jstTime = (ms) => new Date(ms + 9 * 3600 * 1000).toISOString().slice(11, 16);
 
 // 返り値: { run: 一覧・集計用のまとめ, route: 地図用の点 } (屋外ランでなければ null)
 export function analyzeWorkout(w) {
@@ -141,15 +207,25 @@ export function analyzeWorkout(w) {
   const t1 = parseTime(w.end);
   if (!Number.isFinite(t0)) return null;
   const id = String(w.id || w.start).replace(/[^\w-]/g, "-");
-  const duration = Number(w.duration) || (Number.isFinite(t1) ? (t1 - t0) / 1000 : 0);
-  const pts = routePoints(w, t0);
-  const mv = pts.length >= 2 ? movement(pts) : null;
-  const watchKm = km(w.distance) ?? mv?.gpsKm ?? 0;
+  const { pauses, cut, resumed } = pausesOf(w, t0);
+  const duration = cut !== null ? cut - pauses.reduce((a, [s, e]) => a + (e - s), 0)
+    : Number(w.duration) || (Number.isFinite(t1) ? (t1 - t0) / 1000 : 0);
+  const pts = routePoints(w, t0).filter((p) => cut === null || p[0] <= cut);
+  const mv = pts.length >= 2 ? movement(pts, pauses) : null;
+  // 区切ったときは、区切りまでの 1 分ごとの距離の合計 (ウォッチの距離より長ければウォッチの距離) を使う
+  const cutKm = cut !== null ? sumBefore(w.walkingAndRunningDistance, t0, cut, km) : null;
+  const watchKm = cutKm !== null ? Math.min(cutKm, km(w.distance) ?? cutKm) : km(w.distance) ?? mv?.gpsKm ?? 0;
   // 乗り物らしい区間があれば、その分を距離から除く (短いぶれは無視して、ウォッチの距離をそのまま使う)
   const fast = mv && mv.fast >= FAST_FLAG_SEC;
   const distance = fast ? Math.max(0, watchKm - mv.fastKm) : watchKm;
   const moving = mv ? Math.min(mv.moving, duration) : duration;
-  const avgHr = qty(w.avgHeartRate ?? w.heartRate?.avg);
+  const hrBefore = cut === null ? [] : (Array.isArray(w.heartRateData) ? w.heartRateData : [])
+    .filter((x) => (parseTime(x.date) - t0) / 1000 < cut && hrAvg(x) > 0);
+  const avgHr = cut !== null && hrBefore.length ? hrBefore.reduce((a, x) => a + hrAvg(x), 0) / hrBefore.length
+    : qty(w.avgHeartRate ?? w.heartRate?.avg);
+  const maxHr = cut !== null && hrBefore.length ? Math.max(...hrBefore.map((x) => Number(x.Max ?? x.max ?? hrAvg(x))))
+    : qty(w.maxHeartRate ?? w.heartRate?.max);
+  const steps = cut !== null ? sumBefore(w.stepCount, t0, cut, qty) : null;
 
   const flags = [];
   if (fast)
@@ -160,10 +236,13 @@ export function analyzeWorkout(w) {
     flags.push({ code: "low_hr", text: `平均心拍が${Math.round(avgHr)}と、ランにしては低めです` });
   if (!pts.length) flags.push({ code: "no_route", text: "ルートが記録されていません" });
 
-  const kcal = (v) => {
-    const q = qty(v);
-    return Number.isFinite(q) ? (String(v?.units || "").toLowerCase() === "kj" ? q / 4.184 : q) : null;
-  };
+  // 「要確認」ではないが、詳細画面で知らせておくこと
+  const notes = [];
+  if (cut !== null) {
+    const later = (resumed - cut) / 3600;
+    notes.push(`一時停止したまま${later >= 24 ? `${Math.round(later / 24)}日` : `${Math.round(later)}時間`}後に終了されていたので、`
+      + `一時停止した${jstTime(t0 + cut * 1000)}で終わったものとして扱っています（再開したあとの記録は含めません）`);
+  }
   const start = new Date(t0 + 9 * 3600 * 1000).toISOString().slice(0, 19) + "+09:00";
   const run = {
     id,
@@ -175,17 +254,18 @@ export function analyzeWorkout(w) {
     moving_s: round(moving),
     pace_s: distance > 0 ? round(moving / distance) : null, // 動いていた時間での 1km あたりの秒数
     avg_hr: round(avgHr),
-    max_hr: round(qty(w.maxHeartRate ?? w.heartRate?.max)),
-    elevation_up_m: round(qty(w.elevationUp), 1),
-    cadence: round(qty(w.stepCadence)),
+    max_hr: round(maxHr),
+    elevation_up_m: round(cut !== null ? climb(pts) : qty(w.elevationUp), 1),
+    cadence: round(cut !== null ? (steps !== null && duration > 0 ? steps / (duration / 60) : null) : qty(w.stepCadence)),
     temperature_c: round(qty(w.temperature), 1),
     humidity: round(qty(w.humidity)),
-    kcal: round(kcal(w.activeEnergyBurned)),
+    kcal: round(cut !== null ? sumBefore(w.activeEnergy, t0, cut, toKcal) : toKcal(w.activeEnergyBurned)),
     gps_km: mv ? round(mv.gpsKm, 3) : null,
     stopped_s: round(Math.max(0, duration - moving)),
-    splits: splitsOf(w, pts),
-    hr: hrSeries(w, t0),
+    splits: splitsOf(w, pts, t0, cut, distance),
+    hr: hrSeries(w, t0, cut),
     flags,
+    notes,
     source: String(w.source?.name || w.source || ""),
   };
   return { run, route: pts.length ? compactRoute(pts) : null };
