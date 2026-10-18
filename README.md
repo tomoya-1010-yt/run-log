@@ -135,4 +135,5 @@ GitHub の Actions → 通知 → Run workflow でも、送る内容だけを確
 
 ## 第2弾以降
 - 第2弾: AI (走るたびのコメント、月曜の週次レポートとおすすめメニュー)。数字は Python で計算し、GPS の位置は Claude に渡さない
+  - AI が従う指針 (科学的根拠の強さつき) は [docs/coach-guidelines.md](docs/coach-guidelines.md)
 - 第3弾: シューズの走行距離 (ヘルスケアにはシューズの情報がないので、ランログで登録する)
