@@ -4,8 +4,8 @@ pages_build_output_dir = "web"
 compatibility_date = "2026-09-01"
 
 [vars]
-# scripts/gen_vapid.py で作った公開鍵 (公開してよい値)。README の初回セットアップ 3 で貼る
-VAPID_PUBLIC_KEY = ""
+# scripts/gen_vapid.py で作った公開鍵 (公開してよい値)
+VAPID_PUBLIC_KEY = "BJ0jFLK62zxQo8f6dNBd4OFfXcSDokwoGXJdB6LX5uCzBgXK5OurlVNZUgA63S-bMUOnDLopG-aMBn2ka6WCmUc"
 
 [[d1_databases]]
 binding = "DB"
