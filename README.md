@@ -66,7 +66,7 @@ python scripts/gen_vapid.py
 | Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare の API トークン |
 | Secret | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare のアカウント ID |
 | Secret | `VAPID_PRIVATE_KEY` | 手順3 の秘密鍵 |
-| Variable | `APP_URL` | `https://run-log.pages.dev` (デプロイ後に表示される URL) |
+| Variable | `APP_URL` | `https://run-log-8ia.pages.dev` (デプロイ後に表示される URL。run-log はほかの人が使っていたので末尾が付いた) |
 | Variable | `VAPID_SUBJECT` | `mailto:自分のメールアドレス` |
 
 ランダムな文字列は次で作れる。
@@ -82,7 +82,7 @@ Health Auto Export の「オートメーション」で新規作成し、次の�
 | 項目 | 値 |
 |---|---|
 | 種類 | REST API |
-| URL | `https://run-log.pages.dev/api/ingest` |
+| URL | `https://run-log-8ia.pages.dev/api/ingest` |
 | ヘッダー | `Authorization` = `Bearer （HAE_TOKEN の値）` |
 | データ | ワークアウト (ルートを含める)。健康データも送るなら VO2 Max・安静時心拍・心拍変動・ランニング関係 |
 | 形式 | JSON |
@@ -95,7 +95,7 @@ Health Auto Export の書き出しを実行するオートメーションを作�
 Health Auto Export で期間を指定して **JSON** で手動書き出しし、PC から送る。
 Cloudflare の処理時間の上限にかからないよう、ワークアウトは 1 件ずつ送る。
 ```
-python scripts/import_hae.py --url https://run-log.pages.dev --token <HAE_TOKEN> HealthAutoExport_xxxx.zip
+python scripts/import_hae.py --url https://run-log-8ia.pages.dev --token <HAE_TOKEN> HealthAutoExport_xxxx.zip
 ```
 
 ### 7. iPhone
