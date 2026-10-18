@@ -130,7 +130,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 for k, m in months.items():
                     m["km"] = round(m["km"], 2)
                     m["goal"] = goal_for(k)
-                return self.send_json({"today": today(), "last_ingest": settings["last_ingest"], "months": months})
+                since = (dt.date.fromisoformat(today()) - dt.timedelta(days=30)).isoformat()
+                recent = [r["distance_km"] for r in runs.values()
+                          if not r["user_excluded"] and not r["flags"] and r["date"] >= since]
+                return self.send_json({"today": today(), "last_ingest": settings["last_ingest"], "months": months,
+                                       "longest_30d_km": max(recent) if recent else None})
             if path == "/api/internal/notified":
                 if method == "GET":
                     return self.send_json(settings["notified"])

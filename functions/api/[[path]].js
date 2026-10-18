@@ -194,7 +194,12 @@ async function internalStatus(env) {
     months[m] ??= { km: 0, runs: 0 };
     months[m].goal = goalFor(goals, m);
   }
-  return json({ today: jstDate(), last_ingest: await setting(env, "last_ingest"), months });
+  // 過去30日でいちばん長いラン。次のロング走の安全な上限 (この 1.1 倍) に使う。
+  // 「要確認」と「集計から外す」のランは距離があてにならないので除く (docs/coach-guidelines.md の R3)
+  const since = jstDate(Date.now() - 30 * 24 * 3600 * 1000);
+  const longest = await env.DB.prepare(`SELECT MAX(distance_km) AS km FROM runs
+    WHERE user_excluded = 0 AND flagged = 0 AND date >= ?`).bind(since).first();
+  return json({ today: jstDate(), last_ingest: await setting(env, "last_ingest"), months, longest_30d_km: longest?.km ?? null });
 }
 
 // 送った通知の記録。予備の定期実行で同じ通知を二度送らないために使う

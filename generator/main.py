@@ -2,7 +2,7 @@
 
 使い方:
   python generator/main.py daily     # 毎朝: 1日なら先月の振り返り、データが3日届いていなければ警告
-  python generator/main.py weekly    # 日曜の夜: 今月の目標から遅れていればお知らせ
+  python generator/main.py weekly    # 日曜の夜: 今月の目標から遅れていれば、次のロング走の安全な上限とあわせてお知らせ
   python generator/main.py daily --dry-run   # 通知せず、送る内容を表示するだけ
 
 予備の定期実行でも同じ通知を二度送らないよう、送った通知はアプリ側に記録する (/api/internal/notified)。
@@ -41,8 +41,20 @@ def monthly_message(months, month):
     return text
 
 
-def behind_message(months, today):
-    """今月の目標から遅れていれば、残りの距離と1日あたりの目安を返す (順調なら None)"""
+LONG_RUN_LIMIT = 1.1  # 次のロング走は、過去30日の最長のこの倍まで (docs/coach-guidelines.md の R3)
+
+
+def long_run_text(longest_30d_km):
+    """次のロング走の安全な上限の一文"""
+    if not longest_30d_km:
+        return "この30日ほど走っていないので、短い距離から少しずつ再開しましょう。"
+    return (f"次のロング走は{longest_30d_km * LONG_RUN_LIMIT:.1f}kmまでが安全な目安です"
+            f"（過去30日の最長{longest_30d_km:.1f}km×1.1。急に伸ばすとけがのリスクが上がります）。")
+
+
+def behind_message(months, today, longest_30d_km):
+    """今月の目標から遅れていれば、残りの距離と次のロング走の安全な上限を返す (順調なら None)。
+    月末に距離を詰め込むのはけがのもとなので、1日あたりの目安は出さない (docs/coach-guidelines.md の R3・R4)"""
     month = today[:7]
     cur = months.get(month) or {"km": 0, "goal": None}
     goal = cur.get("goal")
@@ -53,12 +65,10 @@ def behind_message(months, today):
     expected = goal * d.day / dim  # 今日の終わりまでに走っておきたい距離
     if cur["km"] >= expected:
         return None
-    remaining = goal - cur["km"]
-    days_left = dim - d.day  # 日曜の夜に送るので、今日は数えない
-    if days_left <= 0:
+    if d.day >= dim:  # 月の最終日は、もう取り戻す日がないので送らない
         return None
-    return (f"今月の目標まであと{remaining:.1f}km。残り{days_left}日、1日平均{remaining / days_left:.1f}kmで達成です"
-            f"（今日までの目安より{expected - cur['km']:.1f}km遅れ）")
+    return (f"今月の目標まであと{goal - cur['km']:.1f}km（今日までの目安より{expected - cur['km']:.1f}km遅れ）。"
+            "無理に取り戻そうとせず、楽なペースを中心に続けましょう。" + long_run_text(longest_30d_km))
 
 
 def send_once(store, key, title, body, dry_run):
@@ -94,11 +104,11 @@ def daily(store, status, dry_run):
 
 
 def weekly(store, status, dry_run):
-    msg = behind_message(status["months"], status["today"])
+    msg = behind_message(status["months"], status["today"], status.get("longest_30d_km"))
     if not msg:
         print("目標どおり、または目標が未設定なので通知しません")
         return
-    send_once(store, f"behind-{status['today']}", "目標から少し遅れています", msg, dry_run)
+    send_once(store, f"behind-{status['today']}", "今月の進み具合", msg, dry_run)
 
 
 def main():

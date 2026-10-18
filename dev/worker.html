@@ -126,8 +126,15 @@
       log((await call("GET", "/api/internal/status", { token: "hae-token" })).status === 401, "HAE_TOKEN では内部 API を読めない");
       const s2 = await call("GET", "/api/internal/status", { token: "ingest-token" });
       const want = samples.filter((s) => s.run.date.startsWith(month) && s.run.id !== target.run.id).reduce((a, s) => a + s.run.distance_km, 0);
-      log(Math.abs(s2.data.months[month].km - Math.round(want * 100) / 100) < 0.011 && s2.data.months[month].goal === 100.3,
-        "月の集計は「集計から外す」を除く・目標つき", JSON.stringify(s2.data.months[month]) + ` 期待値 ${want.toFixed(2)}`);
+      // 外したランがその月で唯一のランなら、その月は集計に出てこない (今月を除く)
+      const m = s2.data.months[month];
+      const onlyRun = want === 0 && month !== s2.data.today.slice(0, 7);
+      log(onlyRun ? !m : !!m && Math.abs(m.km - Math.round(want * 100) / 100) < 0.011 && m.goal === 100.3,
+        "月の集計は「集計から外す」を除く・目標つき", JSON.stringify(m ?? null) + ` 期待値 ${want.toFixed(2)}`);
+      const since = new Date(Date.now() + 9 * 3600e3 - 30 * 86400e3).toISOString().slice(0, 10);
+      const recent = samples.filter((s) => s.run.id !== target.run.id && !s.run.flags.length && s.run.date >= since).map((s) => s.run.distance_km);
+      const wantLongest = recent.length ? Math.max(...recent) : null;
+      log(s2.data.longest_30d_km === wantLongest, "過去30日の最長 (要確認・集計外を除く)", `${s2.data.longest_30d_km} 期待値 ${wantLongest}`);
       const next = s2.data.months[s2.data.today.slice(0, 7)];
       log(next && "goal" in next, "今月の集計がある (ランがなくても)", JSON.stringify(next));
       await call("PUT", "/api/internal/notified", { token: "ingest-token", body: { key: "monthly-2026-09" } });

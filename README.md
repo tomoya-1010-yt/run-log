@@ -19,7 +19,8 @@ iPhone のホーム画面アプリ (web/)
         ↑ 内部 API (INGEST_TOKEN)
 GitHub Actions (.github/workflows/notify.yml)
   - 毎朝 7:00 JST (予備 8:00): 1日なら先月の振り返り、データが3日届いていなければ警告
-  - 日曜 22:30 JST (予備 23:15): 今月の目標から遅れていればお知らせ
+  - 日曜 22:30 JST (予備 23:15): 今月の目標から遅れていればお知らせ。距離の詰め込みはすすめず、
+    次のロング走の安全な上限 (過去30日の最長 × 1.1) を示す (docs/coach-guidelines.md の R3)
 ```
 
 ### 取り込みのルール (shared/analyze.js)
