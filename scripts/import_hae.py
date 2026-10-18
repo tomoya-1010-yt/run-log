@@ -2,6 +2,7 @@
 
 書き出しは「形式: JSON」で。zip のままでも JSON ファイルでもよい。
 Cloudflare の処理時間の上限にかからないよう、ワークアウトは 1 件ずつ送る。
+ラン以外のワークアウトと、ランログで使わない健康データ (歩数・1分ごとの心拍など) は送らない。
 
   python scripts/import_hae.py --url https://run-log.pages.dev --token <HAE_TOKEN> HealthAutoExport_xxx.zip
   python scripts/import_hae.py --url http://localhost:8789 --token dev HealthAutoExport_xxx.zip   # ローカル確認用
@@ -13,6 +14,17 @@ import sys
 import zipfile
 
 import requests
+
+# ランログが保存する健康データ (shared/analyze.js の METRICS と同じ)
+METRICS = ["vo2_max", "resting_heart_rate", "heart_rate_variability", "running_power",
+           "running_stride_length", "running_ground_contact_time", "running_vertical_oscillation", "running_speed"]
+METRICS_PER_POST = 500  # 健康データは 1 回にこの件数ずつ送る
+
+
+def is_running(w):
+    """ラン以外 (ウォーキングなど) は送らない。屋内かどうかはサーバー側で判定する"""
+    acts = w.get("activities") or []
+    return any(a.get("activityType") == "running" for a in acts) if acts else True
 
 
 def load(path):
@@ -44,11 +56,16 @@ def main():
         res.raise_for_status()
         return res.json()
 
+    # 大きなデータを送る前に、URL とトークンが正しいかを空のデータで確かめる
+    post({"workouts": []})
+
     runs = skipped = metrics = 0
     for path in args.files:
         for doc in load(path):
             data = doc.get("data") or {}
-            workouts = data.get("workouts") or []
+            all_workouts = data.get("workouts") or []
+            workouts = [w for w in all_workouts if is_running(w)]
+            skipped += len(all_workouts) - len(workouts)
             for i, w in enumerate(workouts, 1):
                 r = post({"workouts": [w]})
                 runs += r["runs"]
@@ -56,8 +73,16 @@ def main():
                 print(f"\r{path}: ワークアウト {i}/{len(workouts)}", end="", flush=True)
             if workouts:
                 print()
-            if data.get("metrics"):
-                metrics += post({"metrics": data["metrics"]})["metrics"]
+            rows = [(m["name"], m.get("units") or "", d) for m in data.get("metrics") or [] if m.get("name") in METRICS
+                    for d in m.get("data") or []]
+            for i in range(0, len(rows), METRICS_PER_POST):
+                chunk = {}
+                for name, units, d in rows[i:i + METRICS_PER_POST]:
+                    chunk.setdefault(name, {"name": name, "units": units, "data": []})["data"].append(d)
+                metrics += post({"metrics": list(chunk.values())})["metrics"]
+                print(f"\r{path}: 健康データ {min(i + METRICS_PER_POST, len(rows))}/{len(rows)}", end="", flush=True)
+            if rows:
+                print()
     print(f"取り込み: 屋外ラン {runs} 件 (ラン以外・屋内 {skipped} 件は対象外)、健康データ {metrics} 件")
 
 
