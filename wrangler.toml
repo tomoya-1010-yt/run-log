@@ -1,0 +1,15 @@
+# Cloudflare Pages の設定 (デプロイは .github/workflows/deploy.yml が行う)
+name = "run-log"
+pages_build_output_dir = "web"
+compatibility_date = "2026-09-01"
+
+[vars]
+# scripts/gen_vapid.py で作った公開鍵 (公開してよい値)。README の初回セットアップ 3 で貼る
+VAPID_PUBLIC_KEY = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "run-log"
+# README の初回セットアップ 2 で作った D1 の Database ID を貼る
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

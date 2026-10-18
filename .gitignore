@@ -1,0 +1,10 @@
+__pycache__/
+.venv/
+.wrangler/
+node_modules/
+.claude/
+.secrets/
+# 書き出したデータ (自宅まわりの位置が入っているので GitHub に上げない)
+run-log-*.json
+HealthAutoExport*
+*.gpx

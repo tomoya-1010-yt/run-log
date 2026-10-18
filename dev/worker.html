@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>API の動作確認</title>
+  <style>
+    body { font: 14px/1.6 system-ui, sans-serif; margin: 16px; }
+    .ok { color: #0f7a4c; } .ng { color: #c0392b; } pre { white-space: pre-wrap; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>functions/api の動作確認</h1>
+  <p>本番の functions/api/[[path]].js と migrations/*.sql を、ブラウザ上の SQLite (sql.js) を D1 の代わりにして動かします。
+    Node.js がなくても、受け取り・集計・ログインまで本物のコードで確かめられます。</p>
+  <ul id="out"><li>確認中…</li></ul>
+  <script type="module">
+    const out = document.getElementById("out");
+    out.innerHTML = "";
+    let failed = 0;
+    const log = (ok, name, detail = "") => {
+      if (!ok) failed++;
+      out.insertAdjacentHTML("beforeend", `<li class="${ok ? "ok" : "ng"}">${ok ? "✓" : "✗"} ${name}${detail ? `<pre>${detail}</pre>` : ""}</li>`);
+    };
+
+    // ---------- sql.js で D1 の代わりを作る ----------
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js";
+      s.onload = resolve; s.onerror = reject;
+      document.head.append(s);
+    });
+    const SQL = await initSqlJs({ locateFile: (f) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}` });
+    const db = new SQL.Database();
+    for (const f of ["0001_init.sql"]) db.exec(await (await fetch(`/migrations/${f}`)).text());
+    class Stmt {
+      constructor(sql, args = []) { this.sql = sql; this.args = args; }
+      bind(...args) { return new Stmt(this.sql, args); }
+      rows() {
+        const st = db.prepare(this.sql);
+        st.bind(this.args);
+        const rows = [];
+        while (st.step()) rows.push(st.getAsObject());
+        st.free();
+        return rows;
+      }
+      async first() { return this.rows()[0] ?? null; }
+      async all() { return { results: this.rows() }; }
+      async run() { db.run(this.sql, this.args); return { meta: { changes: db.getRowsModified() } }; }
+    }
+    const DB = {
+      prepare: (sql) => new Stmt(sql),
+      batch: async (stmts) => { db.exec("BEGIN"); try { for (const s of stmts) await s.run(); db.exec("COMMIT"); } catch (e) { db.exec("ROLLBACK"); throw e; } },
+    };
+    const env = { DB, APP_PASSPHRASE: "テスト 合言葉", INGEST_TOKEN: "ingest-token", HAE_TOKEN: "hae-token", VAPID_PUBLIC_KEY: "pub" };
+
+    // ---------- 本物の functions を読み込む (import 先だけ書き換える) ----------
+    let src = await (await fetch("/functions/api/[[path]].js")).text();
+    src = src.replace("../../shared/analyze.js", `${location.origin}/shared/analyze.js`);
+    const { onRequest } = await import(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    let cookie = "";
+    async function call(method, path, { body, token, raw } = {}) {
+      const headers = { "content-type": "application/json" };
+      if (token) headers.authorization = `Bearer ${token}`;
+      if (cookie) headers.cookie = cookie;
+      // ブラウザの Request は cookie ヘッダーを消してしまうので、functions が使う部分だけをまねたものを渡す
+      const text = raw ?? (body === undefined ? "" : JSON.stringify(body));
+      const request = { url: `https://run-log.test${path}`, method, headers: { get: (k) => headers[k.toLowerCase()] ?? null },
+        json: async () => JSON.parse(text) };
+      const res = await onRequest({ request, env });
+      return { status: res.status, data: await res.json().catch(() => null) };
+    }
+    // ブラウザは Response の set-cookie ヘッダーを読ませないので、ログインで受け取るはずの Cookie をここで作る
+    // (functions/api の sessionToken と同じ計算)
+    async function sessionCookie(pass) {
+      const enc = new TextEncoder();
+      const key = await crypto.subtle.importKey("raw", enc.encode(pass.normalize("NFKC").trim()), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+      const sig = await crypto.subtle.sign("HMAC", key, enc.encode("run-log-session-v1"));
+      return "run_session=" + [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    const samples = await (await fetch("/dev/raw")).json(); // dev/server.py が受け取ったワークアウト
+    try {
+      // 受け取り
+      log((await call("POST", "/api/ingest", { body: { data: { workouts: [] } } })).status === 401, "トークンなしの受け取りは 401");
+      log((await call("POST", "/api/ingest", { body: { data: {} }, token: "ingest-token" })).status === 401, "INGEST_TOKEN では受け取れない (HAE_TOKEN だけ)");
+      log((await call("POST", "/api/ingest", { raw: "{oops", token: "hae-token" })).status === 400, "壊れた JSON は 400");
+      const walk = { ...samples[0].workout, id: "WALK-1", activities: [{ activityType: "walking" }], name: "屋外 歩く" };
+      const r1 = await call("POST", "/api/ingest", { token: "hae-token",
+        body: { data: { workouts: [...samples.map((s) => s.workout), walk], metrics: [{ name: "vo2_max", units: "ml", data: [{ date: "2026-10-18 00:00:00 +0900", qty: 43.5 }] }] } } });
+      log(r1.status === 200 && r1.data.runs === samples.length && r1.data.skipped === 1 && r1.data.metrics === 1,
+        `受け取り: ラン ${samples.length} 件・ウォーキングは対象外・健康データ 1 件`, JSON.stringify(r1.data));
+      const again = await call("POST", "/api/ingest", { token: "hae-token", body: { data: { workouts: [samples[0].workout] } } });
+      const count = db.exec("SELECT COUNT(*) FROM runs")[0].values[0][0];
+      log(again.data.runs === 1 && count === samples.length, "同じランをもう一度送っても 1 件のまま", `runs=${count}`);
+      const stored = JSON.parse(db.exec(`SELECT body FROM runs WHERE id = '${samples[0].run.id}'`)[0].values[0][0]);
+      log(JSON.stringify(stored) === JSON.stringify(samples[0].run), "保存した内容が Python 版の分析結果と同じ");
+
+      // ログイン
+      log((await call("GET", "/api/state")).status === 401, "ログイン前は 401");
+      log((await call("POST", "/api/login", { body: { passphrase: "ちがう" } })).status === 401, "違う合言葉は 401");
+      log((await call("POST", "/api/login", { body: { passphrase: " テスト　合言葉 " } })).status === 200,
+        "全角スペース・前後の空白があってもログインできる");
+      cookie = "run_session=wrong";
+      log((await call("GET", "/api/state")).status === 401, "違う Cookie では読めない");
+      cookie = await sessionCookie(env.APP_PASSPHRASE);
+
+      // アプリ用
+      const st = await call("GET", "/api/state");
+      log(st.status === 200 && st.data.runs.length === samples.length && !("splits" in st.data.runs[0]) && st.data.last_ingest?.runs === 1,
+        "一覧は軽い形 (1kmごと・心拍なし) で全件");
+      const target = samples.find((s) => s.run.flags.length) || samples[0];
+      const d = await call("GET", `/api/runs/${target.run.id}`);
+      log(d.status === 200 && d.data.run.splits.length === target.run.splits.length && d.data.route?.lat.length === target.route?.lat.length,
+        "詳細は 1kmごと・ルートつき");
+      log((await call("GET", "/api/runs/nothing")).status === 404, "ないランは 404");
+      log((await call("PUT", `/api/runs/${target.run.id}`, { body: { excluded: true } })).status === 200, "集計から外す");
+      await call("POST", "/api/ingest", { token: "hae-token", body: { data: { workouts: [target.workout] } } });
+      const ex = (await call("GET", "/api/state")).data.runs.find((r) => r.id === target.run.id);
+      log(ex.user_excluded === true, "送り直しても「集計から外す」は残る");
+      const month = target.run.date.slice(0, 7);
+      log((await call("PUT", "/api/goal", { body: { month, km: 0 } })).status === 400, "目標 0km は 400");
+      const g = await call("PUT", "/api/goal", { body: { month, km: 100.25 } });
+      log(g.data.goals[month] === 100.3, "目標を保存 (小数1桁に丸める)", JSON.stringify(g.data));
+
+      // 通知スクリプト用
+      log((await call("GET", "/api/internal/status", { token: "hae-token" })).status === 401, "HAE_TOKEN では内部 API を読めない");
+      const s2 = await call("GET", "/api/internal/status", { token: "ingest-token" });
+      const want = samples.filter((s) => s.run.date.startsWith(month) && s.run.id !== target.run.id).reduce((a, s) => a + s.run.distance_km, 0);
+      log(Math.abs(s2.data.months[month].km - Math.round(want * 100) / 100) < 0.011 && s2.data.months[month].goal === 100.3,
+        "月の集計は「集計から外す」を除く・目標つき", JSON.stringify(s2.data.months[month]) + ` 期待値 ${want.toFixed(2)}`);
+      const next = s2.data.months[s2.data.today.slice(0, 7)];
+      log(next && "goal" in next, "今月の集計がある (ランがなくても)", JSON.stringify(next));
+      await call("PUT", "/api/internal/notified", { token: "ingest-token", body: { key: "monthly-2026-09" } });
+      log((await call("GET", "/api/internal/notified", { token: "ingest-token" })).data[0] === "monthly-2026-09", "送った通知を記録できる");
+      const exp = await call("GET", "/api/export");
+      log(exp.status === 200 && exp.data.runs.length === samples.length && exp.data.metrics.length === 1, "書き出し");
+      log((await call("POST", "/api/logout")).status === 200, "ログアウト");
+      cookie = "";
+      log((await call("GET", "/api/state")).status === 401, "Cookie がなければ読めない");
+    } catch (e) {
+      log(false, "途中で失敗", e.stack);
+    }
+    out.insertAdjacentHTML("afterbegin", `<li id="summary" class="${failed ? "ng" : "ok"}"><b>${failed ? `${failed}件 失敗` : "すべて成功"}</b></li>`);
+  </script>
+</body>
+</html>

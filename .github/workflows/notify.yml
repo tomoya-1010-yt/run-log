@@ -1,0 +1,60 @@
+name: 通知
+
+on:
+  schedule:
+    # 毎朝 7:00 JST (= 22:00 UTC)。1日なら先月の振り返り、データが3日届いていなければ警告
+    - cron: "0 22 * * *"
+    # 予備: 8:00 JST。定期実行はまれに丸ごと飛ばされるため。送信済みの通知は送らない
+    - cron: "0 23 * * *"
+    # 日曜 22:30 JST (= 13:30 UTC)。今月の目標から遅れていればお知らせ
+    - cron: "30 13 * * 0"
+    # 予備: 日曜 23:15 JST
+    - cron: "15 14 * * 0"
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "実行する通知"
+        type: choice
+        options: [daily, weekly]
+        default: daily
+      dry_run:
+        description: "通知せず、送る内容を表示するだけ"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notify
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+      INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 通知
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          COMMAND: ${{ inputs.command }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          # 日曜の夜の2つは weekly、それ以外 (毎朝) は daily
+          case "$SCHEDULE" in
+            "30 13 * * 0"|"15 14 * * 0") COMMAND=weekly ;;
+            "") ;;  # 手動実行は選んだもの
+            *) COMMAND=daily ;;
+          esac
+          python generator/main.py "$COMMAND" $([ "$DRY_RUN" = "true" ] && echo --dry-run)

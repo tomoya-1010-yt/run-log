@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>分析処理の一致確認</title>
+  <style>
+    body { font: 14px/1.6 system-ui, sans-serif; margin: 16px; }
+    .ok { color: #0f7a4c; } .ng { color: #c0392b; } pre { white-space: pre-wrap; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>shared/analyze.js と dev/analyze.py の一致確認</h1>
+  <p>dev/server.py が受け取ったワークアウト (最新20件) を、ブラウザで shared/analyze.js にかけ、Python 版の結果と比べます。</p>
+  <div id="out">確認中…</div>
+  <script type="module">
+    import { analyzeWorkout } from "/shared/analyze.js";
+    // 小数の表し方の違い (3 と 3.0 など) は同じものとして比べる
+    function diff(a, b, path = "") {
+      if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 1e-9 ? [] : [`${path}: JS=${a} Py=${b}`];
+      if (Array.isArray(a) && Array.isArray(b)) {
+        if (a.length !== b.length) return [`${path}: 長さ JS=${a.length} Py=${b.length}`];
+        return a.flatMap((x, i) => diff(x, b[i], `${path}[${i}]`));
+      }
+      if (a && b && typeof a === "object" && typeof b === "object") {
+        const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+        return [...keys].flatMap((k) => diff(a[k], b[k], path ? `${path}.${k}` : k));
+      }
+      return a === b ? [] : [`${path}: JS=${JSON.stringify(a)} Py=${JSON.stringify(b)}`];
+    }
+    const items = await (await fetch("/dev/raw")).json();
+    let ng = 0;
+    const html = items.map(({ workout, run, route }) => {
+      const js = analyzeWorkout(workout);
+      const d = [...diff(js.run, run, "run"), ...diff(js.route, route, "route")];
+      if (d.length) ng++;
+      return `<li class="${d.length ? "ng" : "ok"}">${run.date} ${run.distance_km}km — ${d.length ? "不一致" : "一致"}
+        ${d.length ? `<pre>${d.slice(0, 20).join("\n")}</pre>` : ""}</li>`;
+    });
+    document.getElementById("out").innerHTML =
+      `<p id="summary" class="${ng ? "ng" : "ok"}">${items.length}件中 ${items.length - ng}件が一致</p><ul>${html.join("")}</ul>`;
+  </script>
+</body>
+</html>

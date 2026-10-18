@@ -1,0 +1,295 @@
+:root {
+  --bg: #f5f4f1;
+  --card: #ffffff;
+  --text: #1e1d1c;
+  --sub: #5f5d5a;
+  --muted: #8a8783;
+  --line: #e6e2dc;
+  --grid: #eeebe6;
+  --accent: #d2561a;
+  --accent-text: #b34512;     /* 文字に使うときの濃いめのアクセント (コントラストを確保) */
+  --accent-soft: #fbe9df;
+  --on-accent: #ffffff;
+  --ghost: #c9c4bc;           /* 比較用 (去年) の棒 */
+  --warn: #a8550a;
+  --warn-soft: #fdf1e2;
+  --good: #1c7a52;
+  --tab-h: 56px;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161617;
+    --card: #222224;
+    --text: #ececec;
+    --sub: #b0aeab;
+    --muted: #85827e;
+    --line: #333336;
+    --grid: #2c2c2f;
+    --accent: #f07a3c;
+    --accent-text: #f59a69;
+    --accent-soft: #3f2417;
+    --on-accent: #1d0f07;
+    --ghost: #57534e;
+    --warn: #f3a65a;
+    --warn-soft: #3d2b17;
+    --good: #5cc795;
+  }
+}
+
+* { box-sizing: border-box; }
+/* display を指定した要素でも hidden 属性で隠れるようにする */
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  padding-bottom: calc(var(--tab-h) + env(safe-area-inset-bottom) + 16px);
+  overflow-x: hidden;
+}
+button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; cursor: pointer; }
+main { max-width: 640px; margin: 0 auto; padding: 12px 16px; }
+
+/* ---------- ヘッダー ---------- */
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 1001; /* 地図より手前 */
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.top-row { display: flex; align-items: center; gap: 6px; max-width: 640px; margin: 0 auto; min-height: 32px; }
+h1 { font-size: 18px; margin: 0; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-btn {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 999px;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  line-height: 1;
+  flex: none;
+}
+.icon-btn { margin-left: auto; border: none; background: none; padding: 4px; color: var(--sub); flex: none; }
+.icon-btn .ico { width: 24px; height: 24px; }
+.ico { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- 共通 ---------- */
+.empty { text-align: center; color: var(--muted); margin: 48px 0; }
+.empty strong { display: block; color: var(--text); font-size: 17px; margin-bottom: 4px; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.card h2 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.card h2 .note { font-weight: 400; }
+.card.warn { background: var(--warn-soft); border-color: var(--warn); }
+.card.warn h2 { color: var(--warn); }
+.card.warn p { margin: 0 0 6px; font-size: 14px; }
+.note, .hint { font-size: 12px; color: var(--muted); }
+.hint { margin: 8px 0 0; }
+.muted { color: var(--muted); font-size: 14px; margin: 0; }
+.btn {
+  display: inline-block;
+  border: none;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 600;
+  text-decoration: none;
+  text-align: center;
+}
+.btn.ghost { background: transparent; color: var(--accent-text); border: 1px solid var(--accent); }
+.btn:disabled { opacity: .5; }
+.link-btn { border: none; background: none; color: var(--accent-text); padding: 0; font-size: 14px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- ホーム: 今月の目標 ---------- */
+.goal-card .month { font-size: 13px; color: var(--muted); margin: 0; }
+.hero { display: flex; align-items: baseline; gap: 6px; margin: 2px 0 8px; flex-wrap: wrap; }
+.hero b { font-size: 48px; line-height: 1.1; font-weight: 700; letter-spacing: -.01em; }
+.hero span { font-size: 16px; color: var(--sub); }
+.meter { height: 10px; border-radius: 999px; background: var(--accent-soft); overflow: hidden; position: relative; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 999px; }
+.meter s { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); opacity: .55; border-radius: 1px; }
+.meter-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.pace-guide { margin: 10px 0 0; padding: 0; list-style: none; font-size: 14px; }
+.pace-guide li { padding: 4px 0; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+.pace-guide li:first-child { border-top: none; }
+.pace-guide b { font-variant-numeric: tabular-nums; }
+.ahead { color: var(--good); }
+.behind { color: var(--warn); }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.tiles.two { grid-template-columns: 1fr 1fr; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.tile span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tile b { font-size: 20px; font-weight: 600; white-space: nowrap; }
+.tile b small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+
+/* ---------- ランの一覧 ---------- */
+.month-head { display: flex; justify-content: space-between; align-items: baseline; margin: 16px 2px 6px; }
+.month-head:first-child { margin-top: 4px; }
+.month-head h2 { font-size: 15px; margin: 0; }
+.month-head span { font-size: 13px; color: var(--muted); }
+.run-list { list-style: none; margin: 0 0 4px; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.card .run-list { border: none; border-radius: 0; margin: 0 -16px -14px; }
+.card:has(.run-list) { overflow: hidden; }
+.run-list li + li { border-top: 1px solid var(--line); }
+.run-row { display: grid; grid-template-columns: 4.6em 1fr auto; align-items: center; gap: 4px 10px; width: 100%; text-align: left;
+  border: none; background: none; padding: 10px 16px; }
+.run-row .d { font-size: 13px; color: var(--sub); line-height: 1.3; }
+.run-row .d small { display: block; font-size: 11px; color: var(--muted); }
+.run-row .km { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.run-row .km small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 1px; }
+.run-row .meta { font-size: 13px; color: var(--sub); text-align: right; font-variant-numeric: tabular-nums; line-height: 1.35; }
+.run-row .meta small { display: block; font-size: 11px; color: var(--muted); }
+.run-row.off .km, .run-row.off .meta { opacity: .45; text-decoration: line-through; }
+.badge { display: inline-block; font-size: 11px; border-radius: 999px; padding: 0 7px; margin-left: 6px; vertical-align: 2px;
+  border: 1px solid var(--warn); color: var(--warn); font-weight: 600; text-decoration: none; }
+.badge.off { border-color: var(--muted); color: var(--muted); }
+
+/* ---------- ランの詳細 ---------- */
+.map { height: 300px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); margin-bottom: 12px; background: var(--grid); }
+.map .msg { display: grid; place-items: center; height: 100%; color: var(--muted); font-size: 14px; }
+@media (prefers-color-scheme: dark) {
+  /* 地図の明るさを抑える (タイルだけ反転し、ルートの線はそのまま) */
+  .map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+}
+.leaflet-container { font: inherit; background: var(--grid); }
+.flags { margin: 0 0 8px; padding-left: 1.2em; font-size: 14px; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
+.switch { position: relative; width: 50px; height: 30px; flex: none; }
+.switch input { opacity: 0; width: 100%; height: 100%; margin: 0; position: absolute; cursor: pointer; }
+.switch i { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .15s; pointer-events: none; }
+.switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .15s; }
+.switch input:checked + i { background: var(--accent); }
+.switch input:checked + i::after { transform: translateX(20px); }
+.splits { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.splits th { font-weight: 400; color: var(--muted); font-size: 12px; text-align: right; padding: 0 0 4px; }
+.splits th:first-child, .splits td:first-child { text-align: left; }
+.splits td { padding: 5px 0; border-top: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.splits td.bar { width: 45%; padding-left: 10px; }
+.splits td.bar i { display: block; height: 8px; border-radius: 0 4px 4px 0; background: var(--accent); min-width: 2px; }
+.splits td.bar i.slow { background: var(--ghost); }
+.splits tr.best td:not(.bar) { font-weight: 700; }
+
+/* ---------- グラフ ---------- */
+.chart { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--line); stroke-width: 1; }
+.chart text { fill: var(--muted); font-size: 10px; font-family: inherit; }
+.chart text.val { fill: var(--sub); font-weight: 600; }
+.chart .bar { fill: var(--accent); }
+.chart .bar.ghost { fill: var(--ghost); }
+.chart .bar.dim { fill: color-mix(in srgb, var(--accent) 45%, var(--card)); }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .area { fill: var(--accent); opacity: .1; }
+.chart .dot { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.chart .goal { stroke: var(--text); stroke-width: 1; opacity: .5; }
+.chart .hit { fill: transparent; }
+/* 触れたときは帯全体の当たり判定 (.hit) が反応するよう、描いた形はタップの対象にしない */
+.chart .bar, .chart .dot, .chart .line, .chart .area, .chart text, .chart .cross, .chart .goal { pointer-events: none; }
+.chart .hit:hover + .bar, .chart .hit.on + .bar { filter: brightness(1.1); }
+.chart .cross { stroke: var(--muted); stroke-width: 1; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--sub); margin: 0 0 6px; flex-wrap: wrap; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--key); margin-right: 5px; vertical-align: -1px; }
+.legend span.line::before { height: 2px; vertical-align: 3px; border-radius: 1px; }
+.compare { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; margin: 0 0 8px; }
+.compare b { font-size: 22px; }
+details.table { margin-top: 6px; font-size: 13px; }
+details.table summary { color: var(--accent-text); cursor: pointer; font-size: 13px; }
+details.table table { width: 100%; border-collapse: collapse; margin-top: 4px; font-variant-numeric: tabular-nums; }
+details.table td, details.table th { padding: 3px 0; border-top: 1px solid var(--line); text-align: right; font-weight: 400; }
+details.table td:first-child, details.table th:first-child { text-align: left; }
+details.table th { color: var(--muted); border-top: none; font-size: 12px; }
+.tooltip {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .14);
+  white-space: nowrap;
+}
+.tooltip b { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
+
+/* ---------- 設定 ---------- */
+.settings section { margin-bottom: 24px; }
+.settings h2 { font-size: 14px; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+.settings p { margin: 0 0 8px; font-size: 14px; }
+.goal-form { display: flex; gap: 8px; align-items: center; }
+.goal-form input, .copy-row input {
+  font: inherit;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  min-width: 0;
+}
+.goal-form input { width: 7em; font-size: 18px; text-align: right; }
+.copy-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.copy-row input { flex: 1; font-size: 13px; }
+.steps { margin: 0 0 8px; padding-left: 1.3em; font-size: 14px; }
+.steps li { margin-bottom: 4px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 14px; margin: 0 0 8px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.login { max-width: 320px; margin: 15vh auto 0; display: flex; flex-direction: column; gap: 10px; }
+.login-lead { margin: 0; text-align: center; color: var(--sub); }
+.login input {
+  font: inherit;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+}
+.show-pass { font-size: 14px; color: var(--sub); }
+.login-msg { margin: 0; min-height: 1.5em; text-align: center; color: var(--warn); font-size: 14px; }
+
+/* ---------- タブ ---------- */
+.tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1001;
+  display: flex;
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tabs button {
+  flex: 1;
+  height: var(--tab-h);
+  border: none;
+  background: none;
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.tabs .ico { width: 22px; height: 22px; }
+.tabs button.active .ico { stroke-width: 2.1; }
+.tabs button.active { color: var(--accent-text); font-weight: 600; }
