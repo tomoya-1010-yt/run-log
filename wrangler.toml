@@ -10,6 +10,6 @@ VAPID_PUBLIC_KEY = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "run-log"
-# README の初回セットアップ 2 で作った D1 の Database ID を貼る
-database_id = "00000000-0000-0000-0000-000000000000"
+# Cloudflare の D1 で作ったデータベース run-log の ID
+database_id = "2c7ddbe5-2385-4dca-bc5f-736e82824ddf"
 migrations_dir = "migrations"
