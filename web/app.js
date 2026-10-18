@@ -148,6 +148,20 @@ function staleCard() {
 
 // ---------- ホーム ----------
 
+const LONG_RUN_LIMIT = 1.1; // 次のロング走は、過去30日の最長のこの倍まで (docs/coach-guidelines.md の R3)
+
+// 次のロング走の安全な上限。「要確認」と「集計から外す」のランは距離があてにならないので除く
+function longRunLine() {
+  const since = shiftDate(today, -30);
+  const longest = Math.max(0, ...counted().filter((r) => r.date >= since && !r.flags?.length).map((r) => r.distance_km));
+  if (!longest) return `<li><span>この30日ほど走っていません</span><b>短い距離から再開</b></li>`;
+  return `<li><span>次のロング走の上限<small>過去30日の最長 ${fmtKm(longest)} km × 1.1</small></span>
+    <b>${fmtKm(longest * LONG_RUN_LIMIT)} km まで</b></li>`;
+}
+
+const LONG_RUN_HINT = `<p class="hint">1回の距離が過去30日の最長の1.1倍を超えると、けがのリスクが上がるという研究があります。
+  遅れていても、距離を詰め込まずに続けましょう。</p>`;
+
 function renderHome() {
   setHeader("ランログ");
   const month = today.slice(0, 7);
@@ -163,25 +177,25 @@ function renderHome() {
     const pct = Math.min(100, (m.km / goal) * 100);
     const expected = (goal * day) / dim; // 今日の終わりまでに走っておきたい距離
     const diff = m.km - expected;
-    const remaining = Math.max(0, goal - m.km);
-    const daysLeft = dim - day + 1;
-    const guide = remaining <= 0
+    // 1日あたりの目安は出さない (月末の詰め込みはけがのもと)。代わりに次のロング走の安全な上限を出す
+    const guide = (m.km >= goal
       ? `<li><span>目標達成！</span><b class="ahead">+${fmtKm(m.km - goal)} km</b></li>`
-      : `<li><span>残り${daysLeft}日（今日を含む）</span><b>1日平均 ${fmtKm(remaining / daysLeft)} km</b></li>
-         <li><span>今日までの目安 ${fmtKm(expected)} km</span>
-           <b class="${diff >= 0 ? "ahead" : "behind"}">${diff >= 0 ? `+${fmtKm(diff)} km 先行` : `${fmtKm(-diff)} km 遅れ`}</b></li>`;
+      : `<li><span>今日までの目安 ${fmtKm(expected)} km</span>
+           <b class="${diff >= 0 ? "ahead" : "behind"}">${diff >= 0 ? `+${fmtKm(diff)} km 先行` : `${fmtKm(-diff)} km 遅れ`}</b></li>`)
+      + longRunLine();
     goalHtml = `<div class="card goal-card">
       <p class="month">${Number(month.slice(5))}月の目標</p>
       <div class="hero"><b>${fmtKm(m.km)}</b><span>/ ${goal} km</span></div>
       <div class="meter" role="img" aria-label="達成率 ${Math.round(pct)}%"><i style="width:${pct}%"></i>
         <s style="left:calc(${Math.min(100, (expected / goal) * 100)}% - 1px)"></s></div>
       <div class="meter-legend"><span>${Math.round((m.km / goal) * 100)}%</span><span>縦線 = 今日までの目安</span></div>
-      <ul class="pace-guide">${guide}</ul>
+      <ul class="pace-guide">${guide}</ul>${LONG_RUN_HINT}
     </div>`;
   } else {
     goalHtml = `<div class="card goal-card">
       <p class="month">${Number(month.slice(5))}月の距離</p>
       <div class="hero"><b>${fmtKm(m.km)}</b><span>km</span></div>
+      <ul class="pace-guide">${longRunLine()}</ul>${LONG_RUN_HINT}
       <button class="link-btn" data-go="settings">月の目標を決める ›</button></div>`;
   }
 
