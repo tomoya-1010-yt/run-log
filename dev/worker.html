@@ -31,7 +31,7 @@
     });
     const SQL = await initSqlJs({ locateFile: (f) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}` });
     const db = new SQL.Database();
-    for (const f of ["0001_init.sql"]) db.exec(await (await fetch(`/migrations/${f}`)).text());
+    for (const f of ["0001_init.sql", "0002_ai.sql"]) db.exec(await (await fetch(`/migrations/${f}`)).text());
     class Stmt {
       constructor(sql, args = []) { this.sql = sql; this.args = args; }
       bind(...args) { return new Stmt(this.sql, args); }
@@ -139,6 +139,24 @@
       log(next && "goal" in next, "今月の集計がある (ランがなくても)", JSON.stringify(next));
       await call("PUT", "/api/internal/notified", { token: "ingest-token", body: { key: "monthly-2026-09" } });
       log((await call("GET", "/api/internal/notified", { token: "ingest-token" })).data[0] === "monthly-2026-09", "送った通知を記録できる");
+      // AI のコメント・レポート
+      const ir = await call("GET", "/api/internal/runs?since=0000-00-00", { token: "ingest-token" });
+      log(ir.status === 200 && ir.data.length === samples.length && ir.data.every((r) => r.commented === false) && "splits" in ir.data[0],
+        "AI 用のラン一覧 (1kmごとつき・未コメント)");
+      log((await call("PUT", "/api/internal/comments/nothing", { token: "ingest-token", body: { comment: "x" } })).status === 404, "ないランへのコメントは 404");
+      log((await call("PUT", `/api/internal/comments/${samples[0].run.id}`, { token: "ingest-token", body: { evidence: "A" } })).status === 400, "comment がなければ 400");
+      log((await call("PUT", `/api/internal/comments/${samples[0].run.id}`, { token: "ingest-token", body: { comment: "テスト", evidence: "B", rules: ["R1"] } })).status === 200, "コメントを保存");
+      const ir2 = await call("GET", "/api/internal/runs?since=0000-00-00", { token: "ingest-token" });
+      log(ir2.data.find((r) => r.id === samples[0].run.id).commented === true, "保存したランは commented になる");
+      const det = await call("GET", `/api/runs/${samples[0].run.id}`);
+      log(det.data.comment?.comment === "テスト", "ランの詳細にコメントが付く");
+      log((await call("PUT", "/api/internal/report", { token: "ingest-token", body: { id: "bad" } })).status === 400, "日付でない id のレポートは 400");
+      log((await call("PUT", "/api/internal/report", { token: "ingest-token", body: { id: "2026-10-19", headline: "見出し" } })).status === 200, "レポートを保存");
+      const ids = await call("GET", "/api/internal/reports", { token: "ingest-token" });
+      log(JSON.stringify(ids.data.ids) === '["2026-10-19"]', "レポートの一覧");
+      const rp = await call("GET", "/api/reports");
+      log(rp.data.report?.headline === "見出し" && rp.data.list.length === 1, "アプリでレポートを読める");
+      log((await call("GET", "/api/internal/metrics?since=2026-01-01", { token: "ingest-token" })).data.length === 1, "健康データを読める");
       const exp = await call("GET", "/api/export");
       log(exp.status === 200 && exp.data.runs.length === samples.length && exp.data.metrics.length === 1, "書き出し");
       log((await call("POST", "/api/logout")).status === 200, "ログアウト");

@@ -33,6 +33,22 @@ class Store:
     def mark_notified(self, key):
         return self._req("PUT", "/notified", json={"key": key})
 
+    def runs(self, since):
+        """since 以降のラン (1km ごと・心拍の推移・コメント済みかどうかつき)"""
+        return self._req("GET", "/runs", params={"since": since})
+
+    def metrics(self, since):
+        return self._req("GET", "/metrics", params={"since": since})
+
+    def put_comment(self, run_id, comment):
+        return self._req("PUT", f"/comments/{run_id}", json=comment)
+
+    def report_ids(self):
+        return self._req("GET", "/reports")["ids"]
+
+    def put_report(self, report):
+        return self._req("PUT", "/report", json=report)
+
     def subscriptions(self):
         return self._req("GET", "/subscriptions")
 

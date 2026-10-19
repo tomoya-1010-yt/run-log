@@ -137,7 +137,17 @@ async function runDetail(env, id) {
   const row = await env.DB.prepare("SELECT body, user_excluded FROM runs WHERE id = ?").bind(id).first();
   if (!row) return json({ error: "not found" }, { status: 404 });
   const route = await env.DB.prepare("SELECT body FROM routes WHERE id = ?").bind(id).first();
-  return json({ run: { ...JSON.parse(row.body), user_excluded: !!row.user_excluded }, route: route ? JSON.parse(route.body) : null });
+  const comment = await env.DB.prepare("SELECT body FROM comments WHERE run_id = ?").bind(id).first();
+  return json({ run: { ...JSON.parse(row.body), user_excluded: !!row.user_excluded }, route: route ? JSON.parse(route.body) : null,
+    comment: comment ? JSON.parse(comment.body) : null });
+}
+
+// 週次レポートの一覧と、指定した (なければ最新の) レポート
+async function reports(env, url) {
+  const list = (await env.DB.prepare("SELECT id, created_at FROM reports ORDER BY id DESC LIMIT 60").all()).results;
+  const id = url.searchParams.get("id") || list[0]?.id;
+  const row = id ? await env.DB.prepare("SELECT body FROM reports WHERE id = ?").bind(id).first() : null;
+  return json({ list, report: row ? JSON.parse(row.body) : null });
 }
 
 async function updateRun(env, request, id) {
@@ -172,7 +182,11 @@ async function subscribe(env, request) {
 async function exportAll(env) {
   const runs = (await env.DB.prepare("SELECT body, user_excluded FROM runs ORDER BY date").all()).results;
   const metrics = (await env.DB.prepare("SELECT date, name, qty, units FROM daily_metrics ORDER BY date, name").all()).results;
+  const comments = (await env.DB.prepare("SELECT run_id, body FROM comments ORDER BY run_id").all()).results;
+  const reps = (await env.DB.prepare("SELECT body FROM reports ORDER BY id").all()).results;
   return json({
+    comments: comments.map((c) => ({ run_id: c.run_id, ...JSON.parse(c.body) })),
+    reports: reps.map((r) => JSON.parse(r.body)),
     exported_at: new Date().toISOString(),
     goals: await setting(env, "goals", {}),
     runs: runs.map((r) => ({ ...JSON.parse(r.body), user_excluded: !!r.user_excluded })),
@@ -209,6 +223,44 @@ async function internalStatus(env) {
     WHERE user_excluded = 0`).first();
   return json({ today: jstDate(), last_ingest: await setting(env, "last_ingest"), months, longest_30d_km: longest?.km ?? null,
     recent_runs: recent, max_hr: hr?.hr ?? null });
+}
+
+// AI 用: 指定日以降のランをすべて (1km ごと・心拍の推移つき。ルートは除く)。コメント済みかどうかも付ける
+async function internalRuns(env, url) {
+  const since = url.searchParams.get("since") || "0000-00-00";
+  const rows = (await env.DB.prepare(`SELECT r.body, r.user_excluded, c.run_id IS NOT NULL AS commented
+    FROM runs r LEFT JOIN comments c ON c.run_id = r.id WHERE r.date >= ? ORDER BY r.date, r.id`).bind(since).all()).results;
+  return json(rows.map((r) => ({ ...JSON.parse(r.body), user_excluded: !!r.user_excluded, commented: !!r.commented })));
+}
+
+async function internalMetrics(env, url) {
+  const since = url.searchParams.get("since") || "0000-00-00";
+  const rows = (await env.DB.prepare("SELECT date, name, qty, units FROM daily_metrics WHERE date >= ? ORDER BY date")
+    .bind(since).all()).results;
+  return json(rows);
+}
+
+async function putComment(env, request, id) {
+  const c = await request.json().catch(() => null);
+  if (!c || typeof c.comment !== "string") return json({ error: "bad comment" }, { status: 400 });
+  const run = await env.DB.prepare("SELECT id FROM runs WHERE id = ?").bind(id).first();
+  if (!run) return json({ error: "not found" }, { status: 404 });
+  await env.DB.prepare("INSERT OR REPLACE INTO comments (run_id, body, created_at) VALUES (?, ?, ?)")
+    .bind(id, JSON.stringify(c), new Date().toISOString()).run();
+  return json({ ok: true });
+}
+
+async function internalReports(env) {
+  const ids = (await env.DB.prepare("SELECT id FROM reports ORDER BY id").all()).results.map((r) => r.id);
+  return json({ ids });
+}
+
+async function putReport(env, request) {
+  const r = await request.json().catch(() => null);
+  if (!r || !/^\d{4}-\d{2}-\d{2}$/.test(r.id || "")) return json({ error: "bad id" }, { status: 400 });
+  await env.DB.prepare("INSERT OR REPLACE INTO reports (id, created_at, body) VALUES (?, ?, ?)")
+    .bind(r.id, r.created_at || new Date().toISOString(), JSON.stringify(r)).run();
+  return json({ ok: true });
 }
 
 // 送った通知の記録。予備の定期実行で同じ通知を二度送らないために使う
@@ -248,6 +300,12 @@ export async function onRequest({ request, env }) {
     if (!bearer(request, env.INGEST_TOKEN)) return json({ error: "unauthorized" }, { status: 401 });
     if (route === "GET /api/internal/status") return internalStatus(env);
     if (path === "/api/internal/notified") return notified(env, request);
+    if (route === "GET /api/internal/runs") return internalRuns(env, url);
+    if (route === "GET /api/internal/metrics") return internalMetrics(env, url);
+    if (route === "GET /api/internal/reports") return internalReports(env);
+    if (route === "PUT /api/internal/report") return putReport(env, request);
+    const cm = path.match(/^\/api\/internal\/comments\/([\w-]+)$/);
+    if (cm && request.method === "PUT") return putComment(env, request, cm[1]);
     if (path === "/api/internal/subscriptions") return subscriptions(env, request);
     return json({ error: "not found" }, { status: 404 });
   }
@@ -261,6 +319,7 @@ export async function onRequest({ request, env }) {
   if (route === "PUT /api/goal") return putGoal(env, request);
   if (route === "POST /api/subscribe") return subscribe(env, request);
   if (route === "GET /api/export") return exportAll(env);
+  if (route === "GET /api/reports") return reports(env, url);
   const rm = path.match(/^\/api\/runs\/([\w-]+)$/);
   if (rm && request.method === "GET") return runDetail(env, rm[1]);
   if (rm && request.method === "PUT") return updateRun(env, request, rm[1]);

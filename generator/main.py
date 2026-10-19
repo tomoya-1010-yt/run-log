@@ -4,6 +4,10 @@
   python generator/main.py daily     # 毎朝: 1日なら先月の振り返り、データが3日届いていなければ警告
   python generator/main.py weekly    # 日曜の夜: 今月の目標から遅れていれば、次のロング走の安全な上限とあわせてお知らせ
   python generator/main.py plan      # 毎日 18:00: 今日のおすすめ (今日もう走っていれば送らない)
+  python generator/main.py comments          # 7〜23時の毎時: まだコメントのない直近のランに AI のコメントを付ける
+  python generator/main.py comments --count  # コメント待ちの件数だけ表示 (Claude は使わない)
+  python generator/main.py report            # 月曜の朝: 先週の振り返りと今週のメニュー (AI)
+  python generator/main.py report --force    # 作成済みでも作り直す
   python generator/main.py daily --dry-run   # 通知せず、送る内容を表示するだけ
 
 予備の定期実行でも同じ通知を二度送らないよう、送った通知はアプリ側に記録する (/api/internal/notified)。
@@ -11,12 +15,18 @@
 import argparse
 import calendar
 import datetime as dt
+import json
 import sys
 
+import llm
 import push
+import stats
 from store import Store
 
 STALE_DAYS = 3
+COMMENT_DAYS = 3        # この日数より前のランにはコメントを付けない (古いランを取り込んだとき大量に作らないため)
+COMMENTS_PER_RUN = 3    # 1回の実行でコメントを付けるランの数 (残りは次の回)
+HISTORY_DAYS = 180      # 比較に使う過去のランの日数
 
 
 def month_label(m):
@@ -148,16 +158,74 @@ def plan(store, status, dry_run):
     send_once(store, f"plan-{status['today']}", f"今日のおすすめ：{title}", note, dry_run)
 
 
+def pending_comments(runs, today):
+    since = stats.shift(today, -COMMENT_DAYS)
+    return [r for r in runs if r["date"] >= since and not r.get("commented") and not r.get("user_excluded")]
+
+
+def comments(store, status, args):
+    today = status["today"]
+    runs = store.runs(stats.shift(today, -HISTORY_DAYS))
+    pending = pending_comments(runs, today)
+    if args.count:
+        print(len(pending))
+        return
+    if not pending and args.dry_run:
+        # 試し実行で待ちがなければ、いちばん新しいランで文章だけ作ってみる
+        pending = [r for r in stats.usable(runs)][-1:]
+    if not pending:
+        print("コメント待ちのランはありません")
+        return
+    for run in sorted(pending, key=lambda r: r["start"])[:COMMENTS_PER_RUN]:
+        facts = stats.run_facts(run, runs)
+        print(f"{run['date']} {run['distance_km']}km のコメントを作ります")
+        out = llm.run_comment(facts)
+        comment = {**out, "facts": facts, "created_at": dt.datetime.now(dt.timezone.utc).isoformat()}
+        if args.dry_run:
+            print(json.dumps(out, ensure_ascii=False, indent=1))
+            continue
+        store.put_comment(run["id"], comment)
+        push.send(store, f"{run['distance_km']:.1f}km のコメント", out["comment"], url=f"./#run/{run['id']}", tag=f"comment-{run['id']}")
+
+
+def report(store, status, args):
+    today = status["today"]
+    if not args.force and not args.dry_run and today in store.report_ids():
+        print(f"{today} のレポートは作成済みなのでスキップします")
+        return
+    runs = store.runs(stats.shift(today, -HISTORY_DAYS))
+    metrics = store.metrics(stats.shift(today, -60))
+    goals = {m: v["goal"] for m, v in status["months"].items() if v.get("goal")}
+    facts = stats.weekly_facts(runs, metrics, today, goals)
+    if not facts["last_week"]["runs"] and not facts["previous_4_weeks_avg_km"]:
+        print("この5週間ランがないのでレポートは作りません")
+        return
+    print(f"{facts['last_week']['start']}〜{facts['last_week']['end']} のレポートを作ります")
+    out = llm.weekly_report(facts)
+    rep_ = {"id": today, "created_at": dt.datetime.now(dt.timezone.utc).isoformat(), "facts": facts, **out}
+    if args.dry_run:
+        print(json.dumps(out, ensure_ascii=False, indent=1))
+        return
+    store.put_report(rep_)
+    push.send(store, "今週のレポート", out["headline"], url="./#report", tag="report")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["daily", "weekly", "plan"])
-    ap.add_argument("--dry-run", action="store_true", help="通知せず、送る内容を表示するだけ")
+    ap.add_argument("command", choices=["daily", "weekly", "plan", "comments", "report"])
+    ap.add_argument("--dry-run", action="store_true", help="通知・保存せず、内容を表示するだけ")
+    ap.add_argument("--count", action="store_true", help="comments: コメント待ちの件数だけ表示")
+    ap.add_argument("--force", action="store_true", help="report: 作成済みでも作り直す")
     args = ap.parse_args()
     store = Store()
     status = store.status()
     print(f"today={status['today']} months={len(status['months'])}")
     if args.command == "daily":
         daily(store, status, args.dry_run)
+    elif args.command == "comments":
+        comments(store, status, args)
+    elif args.command == "report":
+        report(store, status, args)
     elif args.command == "plan":
         plan(store, status, args.dry_run)
     else:

@@ -34,6 +34,7 @@ runs, routes, raw = {}, {}, {}  # raw: 受け取ったワークアウトその�
 metrics = {}
 settings = {"goals": {}, "last_ingest": None, "notified": []}
 subs = {}
+comments, reports = {}, {}  # AI のコメント (run_id → JSON)・週次レポート (id → JSON)
 
 
 def today():
@@ -106,6 +107,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def api(self, method):
         url = urllib.parse.urlparse(self.path)
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
         path = url.path.rstrip("/")
         route = f"{method} {path}"
         bearer = self.headers.get("authorization") == f"Bearer {TOKEN}"
@@ -146,6 +148,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self.send_json(settings["notified"])
                 settings["notified"].insert(0, self.body()["key"])
                 return self.send_json({"ok": True})
+            if route == "GET /api/internal/runs":
+                since = q.get("since", "0000-00-00")
+                return self.send_json([{**r, "commented": r["id"] in comments}
+                                       for r in sorted(runs.values(), key=lambda r: (r["date"], r["id"])) if r["date"] >= since])
+            if route == "GET /api/internal/metrics":
+                since = q.get("since", "0000-00-00")
+                return self.send_json(sorted((m for m in metrics.values() if m["date"] >= since), key=lambda m: m["date"]))
+            if route == "GET /api/internal/reports":
+                return self.send_json({"ids": sorted(reports)})
+            if route == "PUT /api/internal/report":
+                r = self.body()
+                reports[r["id"]] = r
+                return self.send_json({"ok": True})
+            m = re.match(r"^/api/internal/comments/([\w-]+)$", path)
+            if m and method == "PUT":
+                if m[1] not in runs:
+                    return self.send_json({"error": "not found"}, 404)
+                comments[m[1]] = self.body()
+                return self.send_json({"ok": True})
             if path == "/api/internal/subscriptions":
                 if method == "DELETE":
                     subs.pop(self.body().get("endpoint"), None)
@@ -180,6 +201,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             s = self.body()["subscription"]
             subs[s["endpoint"]] = s
             return self.send_json({"ok": True})
+        if route == "GET /api/reports":
+            ids = sorted(reports, reverse=True)
+            rid = q.get("id") or (ids[0] if ids else None)
+            return self.send_json({"list": [{"id": i, "created_at": reports[i].get("created_at")} for i in ids],
+                                   "report": reports.get(rid)})
         if route == "GET /api/export":
             return self.send_json({"goals": settings["goals"], "runs": sorted(runs.values(), key=lambda r: r["date"]),
                                    "metrics": list(metrics.values())})
@@ -191,7 +217,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if method == "PUT":
                 r["user_excluded"] = bool(self.body().get("excluded"))
                 return self.send_json({"ok": True})
-            return self.send_json({"run": r, "route": routes.get(m[1])})
+            return self.send_json({"run": r, "route": routes.get(m[1]), "comment": comments.get(m[1])})
         return self.send_json({"error": "not found"}, 404)
 
     def do_GET(self):

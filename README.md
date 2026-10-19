@@ -17,7 +17,11 @@ iPhone のホーム画面アプリ (web/)
   記録:   全ランの一覧 → 詳細 (地図・1kmごとのペース・心拍・「集計から外す」)
   グラフ: 週ごと・月ごと (去年の同じ月と比較) の距離、平均ペースの推移
         ↑ 内部 API (INGEST_TOKEN)
-GitHub Actions (.github/workflows/notify.yml)
+GitHub Actions (.github/workflows/notify.yml・ai.yml)
+  - 7〜23時の毎時 (ai.yml): 直近3日のまだコメントのないランに、AI (Claude) が2〜3行のコメントを付けて通知する。
+    コメント待ちがなければ Claude は動かさない
+  - 月曜 7:30 JST (予備 8:30, ai.yml): 先週の振り返りと今週のおすすめメニュー (AI)
+    - AI に渡すのは generator/stats.py で計算した数字だけ (GPS の位置は渡さない)。指針は docs/coach-guidelines.md
   - 毎日 18:00 JST (予備 18:30): 今日のおすすめ (ホームと同じ判定。今日もう走っていれば送らない)
   - 毎朝 7:00 JST (予備 8:00): 1日なら先月の振り返り、データが3日届いていなければ警告
   - 日曜 22:30 JST (予備 23:15): 今月の目標から遅れていればお知らせ。距離の詰め込みはすすめず、
@@ -68,6 +72,7 @@ python scripts/gen_vapid.py
 | Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare の API トークン |
 | Secret | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare のアカウント ID |
 | Secret | `VAPID_PRIVATE_KEY` | 手順3 の秘密鍵 |
+| Secret | `CLAUDE_CODE_OAUTH_TOKEN` | AI のコメント・レポート用。肌ログと同じトークンを使える (新しく作るなら `claude setup-token`。有効期限1年) |
 | Variable | `APP_URL` | `https://run-log-8ia.pages.dev` (デプロイ後に表示される URL。run-log はほかの人が使っていたので末尾が付いた) |
 | Variable | `VAPID_SUBJECT` | `mailto:自分のメールアドレス` |
 
@@ -128,6 +133,15 @@ http://localhost:8789/dev/worker.html で、本番の `functions/api` と `migra
 ブラウザ上の SQLite (sql.js) を D1 の代わりにして動かし、受け取り・ログイン・集計を確かめられる (「すべて成功」になればよい)。
 Node.js を入れなくても試せるようにするためのページ。
 
+### AI のコメント・レポートを試す
+Claude を呼ばずに、決まった文章で保存・通知・画面までの流れを確かめられる (`RUN_LLM_STUB=1`)。
+```
+RUN_LLM_STUB=1 APP_URL=http://localhost:8789 INGEST_TOKEN=dev python generator/main.py comments
+RUN_LLM_STUB=1 APP_URL=http://localhost:8789 INGEST_TOKEN=dev python generator/main.py report
+```
+本物の Claude の文章は、GitHub の Actions →「AI コメントと週次レポート」→ Run workflow (dry_run はオンが初期値) で、
+保存・通知せずに確かめられる。
+
 ### 通知を試す
 ```
 APP_URL=http://localhost:8789 INGEST_TOKEN=dev python generator/main.py daily --dry-run
@@ -136,6 +150,6 @@ APP_URL=http://localhost:8789 INGEST_TOKEN=dev python generator/main.py weekly -
 GitHub の Actions → 通知 → Run workflow でも、送る内容だけを確かめられる (dry_run はオンが初期値)。
 
 ## 第2弾以降
-- 第2弾: AI (走るたびのコメント、月曜の週次レポートとおすすめメニュー)。数字は Python で計算し、GPS の位置は Claude に渡さない
+- 第2弾: AI (走るたびのコメント、月曜の週次レポートとおすすめメニュー) — 実装済み
   - AI が従う指針 (科学的根拠の強さつき) は [docs/coach-guidelines.md](docs/coach-guidelines.md)
 - 第3弾: シューズの走行距離 (ヘルスケアにはシューズの情報がないので、ランログで登録する)

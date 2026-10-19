@@ -1,0 +1,87 @@
+name: AI コメントと週次レポート
+
+on:
+  schedule:
+    # 7:23〜23:23 JST の毎時 (= 22:23〜14:23 UTC)。コメント待ちのランがなければ Claude は動かさない
+    - cron: "23 22-23,0-14 * * *"
+    # 月曜 7:30 JST (= 日曜 22:30 UTC)。先週 (月〜日) の振り返りと今週のメニュー
+    - cron: "30 22 * * 0"
+    # 予備: 月曜 8:30 JST。定期実行はまれに丸ごと飛ばされるため。作成済みなら何もしない
+    - cron: "30 23 * * 0"
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "実行するもの"
+        type: choice
+        options: [comments, report]
+        default: comments
+      dry_run:
+        description: "保存・通知せず、AI の文章を表示するだけ"
+        type: boolean
+        default: true
+      force:
+        description: "report: 作成済みでも作り直す"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai
+  cancel-in-progress: false
+
+jobs:
+  ai:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # claude setup-token で作ったトークン。Claude の契約の範囲で動く (肌ログと同じものを使える)
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      APP_URL: ${{ vars.APP_URL }}
+      INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 実行するものを決める
+        id: what
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          COMMAND: ${{ inputs.command }}
+        run: |
+          case "$SCHEDULE" in
+            "30 22 * * 0"|"30 23 * * 0") COMMAND=report ;;
+            "") ;;  # 手動実行は選んだもの
+            *) COMMAND=comments ;;
+          esac
+          echo "command=$COMMAND" >> "$GITHUB_OUTPUT"
+          if [ "$COMMAND" = comments ] && [ "${{ inputs.dry_run }}" != "true" ]; then
+            # 失敗したらここで止める (件数の取得に失敗したまま Claude を動かさない)
+            count=$(python generator/main.py comments --count | tail -1)
+          else
+            count=1
+          fi
+          echo "コメント待ち: $count 件"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: Claude Code をインストール
+        if: steps.what.outputs.count != '0'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s stable
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: 実行
+        if: steps.what.outputs.count != '0'
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "Secret CLAUDE_CODE_OAUTH_TOKEN が空です。claude setup-token で作ったトークンを登録してください"; exit 1
+          fi
+          python generator/main.py "${{ steps.what.outputs.command }}" \
+            $([ "$DRY_RUN" = "true" ] && echo --dry-run) $([ "$FORCE" = "true" ] && echo --force)

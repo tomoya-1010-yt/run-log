@@ -1,6 +1,6 @@
 const $ = (sel) => document.querySelector(sel);
 const main = $("#main");
-const TABS = ["home", "runs", "charts"];
+const TABS = ["home", "runs", "charts", "report"];
 const WEEKDAYS = "日月火水木金土";
 const STALE_DAYS = 3; // これ以上データが届いていなければ注意を出す
 
@@ -352,7 +352,7 @@ async function renderRun(id) {
     : "";
   const notes = r.notes?.length ? `<div class="card info">${r.notes.map((n) => `<p>${esc(n)}</p>`).join("")}</div>` : "";
   main.innerHTML = `<div class="map" id="map"></div>
-    ${flags}${notes}
+    ${commentHtml(d.comment)}${flags}${notes}
     <div class="tiles">
       ${tile("距離", fmtKm(r.distance_km, 2), "km")}
       ${tile("ペース", fmtPace(r.pace_s), "/km")}
@@ -386,6 +386,54 @@ async function renderRun(id) {
     e.target.disabled = false;
   });
   drawMap($("#map"), d.route);
+}
+
+// ---------- AI ----------
+
+// 根拠の強さの印 (docs/coach-guidelines.md)
+const EVIDENCE_LABEL = { A: "根拠 A", B: "根拠 B", C: "根拠 C", "本人の記録": "記録から" };
+const evidence = (e) => (e ? `<span class="ev ev-${e === "本人の記録" ? "own" : e}">${esc(EVIDENCE_LABEL[e] || e)}</span>` : "");
+
+function commentHtml(c) {
+  if (!c) return `<div class="card ai-card pending"><p class="ai-label">AI のコメント</p>
+    <p class="hint" style="margin:0">走ってから1時間ほどで届きます（7〜23時）。</p></div>`;
+  return `<div class="card ai-card"><p class="ai-label">AI のコメント ${evidence(c.evidence)}</p>
+    <p class="ai-text">${esc(c.comment)}</p></div>`;
+}
+
+let reportData = null;
+
+async function renderReport(id = null) {
+  setHeader("レポート");
+  if (!reportData || id) reportData = await api(`/api/reports${id ? `?id=${encodeURIComponent(id)}` : ""}`);
+  if (view !== "report") return;
+  const { list, report: r } = reportData;
+  if (!r) {
+    main.innerHTML = emptyHtml("まだレポートがありません", "毎週月曜の朝に、先週の振り返りと今週のメニューが届きます");
+    return;
+  }
+  const w = r.facts?.last_week;
+  const items = (arr) => arr.map((x) => `<li>${esc(x.text)} ${evidence(x.evidence)}</li>`).join("");
+  main.innerHTML = `
+    ${list.length > 1 ? `<select class="report-pick" id="report-pick">${list.map((x) =>
+      `<option value="${esc(x.id)}" ${x.id === r.id ? "selected" : ""}>${dateLabel(x.id, true)} のレポート</option>`).join("")}</select>` : ""}
+    <div class="card report-head">
+      <p class="month">${w ? `${md(w.start)}〜${md(w.end)} の振り返り` : ""}</p>
+      <p class="plan-title">${esc(r.headline)}</p>
+      <p class="plan-note">${esc(r.summary)}</p>
+      ${w ? `<div class="tiles" style="margin:10px 0 0">
+        <div class="tile"><span>距離</span><b>${fmtKm(w.km)}<small>km</small></b></div>
+        <div class="tile"><span>回数</span><b>${w.runs}<small>回</small></b></div>
+        <div class="tile"><span>楽な強度</span><b>${w.easy_time_share_pct ?? "–"}<small>%</small></b></div></div>` : ""}
+    </div>
+    ${r.good?.length ? `<div class="card"><h2>良かった点</h2><ul class="report-list">${items(r.good)}</ul></div>` : ""}
+    ${r.cautions?.length ? `<div class="card"><h2>気をつける点</h2><ul class="report-list">${items(r.cautions)}</ul></div>` : ""}
+    <div class="card"><h2>今週のおすすめメニュー</h2>
+      <ul class="plan-list">${(r.plan || []).map((p) => `<li><b>${esc(p.day)}</b><span>${esc(p.menu)}<small>${esc(p.detail)}</small></span></li>`).join("")}</ul>
+      <p class="hint">${esc(r.plan_note)}</p></div>
+    <p class="hint" style="margin:0 2px 12px">AI が、記録から計算した数字と科学的根拠の指針をもとに作っています。体調が悪いときは無理をせず、
+      胸の痛みや強い息切れがあればすぐに走るのをやめて受診してください。</p>`;
+  $("#report-pick")?.addEventListener("change", (e) => guard(renderReport(e.target.value)));
 }
 
 // ---------- グラフ ----------
@@ -538,7 +586,7 @@ async function renderSettings() {
   const msg = $("#push-msg");
   const action = $("#push-action");
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
-  const what = "毎日18時に今日のおすすめ、月末の振り返り（毎月1日の朝）、目標から遅れているとき（日曜の夜）、データが3日届かないときにお知らせします。";
+  const what = "走るたびの AI コメント、月曜の朝の週次レポート、毎日18時に今日のおすすめ、月末の振り返り（毎月1日の朝）、目標から遅れているとき（日曜の夜）、データが3日届かないときにお知らせします。";
   if (status === "on") msg.textContent = `オン：${what}`;
   else if (status === "unsupported" || !standalone)
     msg.textContent = "Safari の共有ボタン →「ホーム画面に追加」で追加したアプリから通知をオンにできます。";
@@ -572,6 +620,10 @@ async function show(name, id = null) {
   if (name === "home") return renderHome();
   if (name === "runs") return renderRuns();
   if (name === "charts") return renderCharts();
+  if (name === "report") {
+    reportData = null; // 新しいレポートが届いているかもしれないので毎回読み直す
+    return renderReport();
+  }
   if (name === "run") return renderRun(id);
   return renderSettings();
 }
