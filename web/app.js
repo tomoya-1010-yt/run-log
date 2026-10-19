@@ -159,18 +159,56 @@ function longRunLine() {
     <b>${fmtKm(longest * LONG_RUN_LIMIT)} km まで</b></li>`;
 }
 
-const LONG_RUN_HINT = `<p class="hint">1回の距離が過去30日の最長の1.1倍を超えると、けがのリスクが上がるという研究があります。
-  遅れていても、距離を詰め込まずに続けましょう。</p>`;
+const LONG_RUN_HINT = `<p class="hint">1回の距離が過去30日の最長の1.1倍を超えると、けがのリスクが上がります。遅れていても詰め込まずに。</p>`;
+
+const EASY_HR = 0.75; // 楽な強度の上限 (最大心拍に対する割合。docs/coach-guidelines.md の R1)
+
+// 最大心拍。記録の最高値と推定式 (208 - 0.7 × 年齢) のうち高いほう。年齢は分からないので記録の最高値を使い、
+// 記録がなければ 185 とみなす (R2)
+const maxHr = () => Math.max(0, ...counted().map((r) => r.max_hr || 0)) || 185;
+
+// 今日のおすすめ。第2弾の AI ができるまでは、前回のランからの間隔と距離だけで決める簡単なルール
+function todayPlan() {
+  const mine = counted().filter((r) => !r.flags?.length);
+  const last = mine[0];
+  const easyHr = Math.round(maxHr() * EASY_HR);
+  if (!last) return { title: "まずは 20分", note: "会話できるくらいの楽なペースで。歩きを混ぜても大丈夫です。" };
+  const gap = Math.round((Date.parse(today) - Date.parse(last.date)) / 86400000);
+  if (gap === 0) return { title: "今日は走りました", note: `${fmtKm(last.distance_km)} km・${fmtPace(last.pace_s)}/km。ゆっくり休みましょう。` };
+  if (gap >= 14) return { title: "短めに 20分", note: `${gap}日ぶりなので、楽なペースで体を慣らしましょう。` };
+  // 前日に長く走った (過去30日の最長に近い) ときは休養をすすめる
+  const since = shiftDate(today, -30);
+  const longest = Math.max(0, ...mine.filter((r) => r.date >= since).map((r) => r.distance_km));
+  if (gap === 1 && longest && last.distance_km >= longest * 0.9)
+    return { title: "休養日", note: "昨日は長めに走ったので、今日は休むか散歩くらいに。" };
+  // ふだんの時間 (直近5回の動いていた時間の中央値) を5分単位で
+  const times = mine.slice(0, 5).map((r) => r.moving_s).sort((a, b) => a - b);
+  const min = Math.max(20, Math.round(times[Math.floor(times.length / 2)] / 60 / 5) * 5);
+  return { title: `楽に ${min}分`, note: `前回から${gap}日空き。心拍${easyHr}以下を目安に。` };
+}
+
+// 直近7日の距離 (今日まで)
+function weekBars() {
+  const days = Array.from({ length: 7 }, (_, i) => shiftDate(today, i - 6));
+  const km = days.map((d) => counted().filter((r) => r.date === d).reduce((a, r) => a + r.distance_km, 0));
+  const top = Math.max(...km, 1);
+  return `<div class="card week-card"><h2>直近7日 <span class="note">${fmtKm(km.reduce((a, b) => a + b, 0))} km</span></h2>
+    <div class="week-bars">${days.map((d, i) => `<div data-tip-title="${md(d)}" data-tip-value="${fmtKm(km[i])} km">
+      <i class="${km[i] ? "" : "zero"}" style="height:${km[i] ? Math.max(8, (km[i] / top) * 100) : 4}%"></i>
+      <span class="${d === today ? "today" : ""}">${WEEKDAYS[new Date(d + "T00:00:00Z").getUTCDay()]}</span></div>`).join("")}</div></div>`;
+}
 
 function renderHome() {
   setHeader("ランログ");
   const month = today.slice(0, 7);
   const day = Number(today.slice(8));
   const dim = daysInMonth(month);
-  const mine = counted();
-  const m = sum(mine.filter((r) => r.date.startsWith(month)));
-  const week = sum(mine.filter((r) => r.date >= weekStart(today)));
+  const m = sum(counted().filter((r) => r.date.startsWith(month)));
   const goal = goalFor(month);
+  const plan = todayPlan();
+
+  const planHtml = `<div class="card plan-card"><p class="plan-label">今日のおすすめ</p>
+    <p class="plan-title">${esc(plan.title)}</p><p class="plan-note">${esc(plan.note)}</p></div>`;
 
   let goalHtml;
   if (goal) {
@@ -178,35 +216,26 @@ function renderHome() {
     const expected = (goal * day) / dim; // 今日の終わりまでに走っておきたい距離
     const diff = m.km - expected;
     // 1日あたりの目安は出さない (月末の詰め込みはけがのもと)。代わりに次のロング走の安全な上限を出す
-    const guide = (m.km >= goal
-      ? `<li><span>目標達成！</span><b class="ahead">+${fmtKm(m.km - goal)} km</b></li>`
-      : `<li><span>今日までの目安 ${fmtKm(expected)} km</span>
-           <b class="${diff >= 0 ? "ahead" : "behind"}">${diff >= 0 ? `+${fmtKm(diff)} km 先行` : `${fmtKm(-diff)} km 遅れ`}</b></li>`)
-      + longRunLine();
     goalHtml = `<div class="card goal-card">
-      <p class="month">${Number(month.slice(5))}月の目標</p>
-      <div class="hero"><b>${fmtKm(m.km)}</b><span>/ ${goal} km</span></div>
+      <div class="goal-head"><span>${Number(month.slice(5))}月の目標</span><b>${fmtKm(m.km)} / ${goal} km</b></div>
       <div class="meter" role="img" aria-label="達成率 ${Math.round(pct)}%"><i style="width:${pct}%"></i>
         <s style="left:calc(${Math.min(100, (expected / goal) * 100)}% - 1px)"></s></div>
-      <div class="meter-legend"><span>${Math.round((m.km / goal) * 100)}%</span><span>縦線 = 今日までの目安</span></div>
-      <ul class="pace-guide">${guide}</ul>${LONG_RUN_HINT}
+      <ul class="pace-guide">${m.km >= goal
+        ? `<li><span>目標達成！</span><b class="ahead">+${fmtKm(m.km - goal)} km</b></li>`
+        : `<li><span>今日までの目安 ${fmtKm(expected)} km</span>
+           <b class="${diff >= 0 ? "ahead" : "behind"}">${diff >= 0 ? `+${fmtKm(diff)} km 先行` : `${fmtKm(-diff)} km 遅れ`}</b></li>`}
+        ${longRunLine()}</ul>${LONG_RUN_HINT}
     </div>`;
   } else {
     goalHtml = `<div class="card goal-card">
-      <p class="month">${Number(month.slice(5))}月の距離</p>
-      <div class="hero"><b>${fmtKm(m.km)}</b><span>km</span></div>
+      <div class="goal-head"><span>${Number(month.slice(5))}月の距離</span><b>${fmtKm(m.km)} km</b></div>
       <ul class="pace-guide">${longRunLine()}</ul>${LONG_RUN_HINT}
       <button class="link-btn" data-go="settings">月の目標を決める ›</button></div>`;
   }
 
-  const recent = runs.slice(0, 5);
-  main.innerHTML = `${staleCard()}${goalHtml}
-    <div class="tiles">
-      <div class="tile"><span>今月の回数</span><b>${m.count}<small>回</small></b></div>
-      <div class="tile"><span>今月のペース</span><b>${fmtPace(m.pace)}<small>/km</small></b></div>
-      <div class="tile"><span>今週の距離</span><b>${fmtKm(week.km)}<small>km</small></b></div>
-    </div>
-    <div class="card"><h2>最近のラン${runs.length > 5 ? `<button class="link-btn" data-go="runs">すべて ›</button>` : ""}</h2>
+  const recent = runs.slice(0, 3);
+  main.innerHTML = `${staleCard()}${planHtml}${goalHtml}${weekBars()}
+    <div class="card"><h2>最近のラン${runs.length > 3 ? `<button class="link-btn" data-go="runs">すべて ›</button>` : ""}</h2>
       ${recent.length ? `<ul class="run-list">${recent.map(runRow).join("")}</ul>` : `<p class="muted">まだランがありません。</p>`}
     </div>`;
 }
