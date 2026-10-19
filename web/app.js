@@ -538,7 +538,7 @@ async function renderSettings() {
   const msg = $("#push-msg");
   const action = $("#push-action");
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
-  const what = "月末の振り返り（毎月1日の朝）、目標から遅れているとき（日曜の夜）、データが3日届かないときにお知らせします。";
+  const what = "毎日18時に今日のおすすめ、月末の振り返り（毎月1日の朝）、目標から遅れているとき（日曜の夜）、データが3日届かないときにお知らせします。";
   if (status === "on") msg.textContent = `オン：${what}`;
   else if (status === "unsupported" || !standalone)
     msg.textContent = "Safari の共有ボタン →「ホーム画面に追加」で追加したアプリから通知をオンにできます。";

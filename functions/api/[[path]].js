@@ -199,7 +199,16 @@ async function internalStatus(env) {
   const since = jstDate(Date.now() - 30 * 24 * 3600 * 1000);
   const longest = await env.DB.prepare(`SELECT MAX(distance_km) AS km FROM runs
     WHERE user_excluded = 0 AND flagged = 0 AND date >= ?`).bind(since).first();
-  return json({ today: jstDate(), last_ingest: await setting(env, "last_ingest"), months, longest_30d_km: longest?.km ?? null });
+  // 今日のおすすめの通知用: 直近30日の、距離があてになるラン (新しい順) と、記録上の最大心拍
+  const recent = (await env.DB.prepare(`SELECT body FROM runs WHERE user_excluded = 0 AND flagged = 0 AND date >= ?
+    ORDER BY date DESC`).bind(since).all()).results.map((r) => {
+    const b = JSON.parse(r.body);
+    return { date: b.date, start: b.start, distance_km: b.distance_km, moving_s: b.moving_s, pace_s: b.pace_s };
+  }).sort((a, b) => b.start.localeCompare(a.start));
+  const hr = await env.DB.prepare(`SELECT MAX(CAST(json_extract(body, '$.max_hr') AS REAL)) AS hr FROM runs
+    WHERE user_excluded = 0`).first();
+  return json({ today: jstDate(), last_ingest: await setting(env, "last_ingest"), months, longest_30d_km: longest?.km ?? null,
+    recent_runs: recent, max_hr: hr?.hr ?? null });
 }
 
 // 送った通知の記録。予備の定期実行で同じ通知を二度送らないために使う

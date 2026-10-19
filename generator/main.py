@@ -1,8 +1,9 @@
-"""通知 (月末の振り返り・目標から遅れているとき・データが届かないとき)。
+"""通知 (今日のおすすめ・月末の振り返り・目標から遅れているとき・データが届かないとき)。
 
 使い方:
   python generator/main.py daily     # 毎朝: 1日なら先月の振り返り、データが3日届いていなければ警告
   python generator/main.py weekly    # 日曜の夜: 今月の目標から遅れていれば、次のロング走の安全な上限とあわせてお知らせ
+  python generator/main.py plan      # 毎日 18:00: 今日のおすすめ (今日もう走っていれば送らない)
   python generator/main.py daily --dry-run   # 通知せず、送る内容を表示するだけ
 
 予備の定期実行でも同じ通知を二度送らないよう、送った通知はアプリ側に記録する (/api/internal/notified)。
@@ -71,6 +72,33 @@ def behind_message(months, today, longest_30d_km):
             "無理に取り戻そうとせず、楽なペースを中心に続けましょう。" + long_run_text(longest_30d_km))
 
 
+EASY_HR = 0.75  # 楽な強度の上限 (最大心拍に対する割合。docs/coach-guidelines.md の R1)
+
+
+def today_plan(status):
+    """今日のおすすめ (title, note)。web/app.js の todayPlan と同じ判定。今日もう走っていれば None。
+    内部 API は直近30日のランしか返さないので、それより前に最後に走った人は「しばらく空いた」として扱う"""
+    today = dt.date.fromisoformat(status["today"])
+    runs = status.get("recent_runs") or []
+    easy_hr = round((status.get("max_hr") or 185) * EASY_HR)
+    if not runs:
+        if any(m.get("runs") for m in status["months"].values()):
+            return "短めに 20分", "しばらく空いたので、楽なペースで体を慣らしましょう。"
+        return "まずは 20分", "会話できるくらいの楽なペースで。歩きを混ぜても大丈夫です。"
+    last = runs[0]
+    gap = (today - dt.date.fromisoformat(last["date"])).days
+    if gap <= 0:
+        return None
+    if gap >= 14:
+        return "短めに 20分", f"{gap}日ぶりなので、楽なペースで体を慣らしましょう。"
+    longest = max(r["distance_km"] for r in runs)
+    if gap == 1 and last["distance_km"] >= longest * 0.9:
+        return "休養日", "昨日は長めに走ったので、今日は休むか散歩くらいに。"
+    times = sorted(r["moving_s"] for r in runs[:5])
+    minutes = max(20, round(times[len(times) // 2] / 60 / 5) * 5)
+    return f"楽に {minutes}分", f"前回から{gap}日空き。心拍{easy_hr}以下を目安に。"
+
+
 def send_once(store, key, title, body, dry_run):
     if dry_run:
         print(f"[dry-run] {key}: {title} / {body}")
@@ -111,9 +139,18 @@ def weekly(store, status, dry_run):
     send_once(store, f"behind-{status['today']}", "今月の進み具合", msg, dry_run)
 
 
+def plan(store, status, dry_run):
+    p = today_plan(status)
+    if not p:
+        print("今日はもう走っているので通知しません")
+        return
+    title, note = p
+    send_once(store, f"plan-{status['today']}", f"今日のおすすめ：{title}", note, dry_run)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["daily", "weekly"])
+    ap.add_argument("command", choices=["daily", "weekly", "plan"])
     ap.add_argument("--dry-run", action="store_true", help="通知せず、送る内容を表示するだけ")
     args = ap.parse_args()
     store = Store()
@@ -121,6 +158,8 @@ def main():
     print(f"today={status['today']} months={len(status['months'])}")
     if args.command == "daily":
         daily(store, status, args.dry_run)
+    elif args.command == "plan":
+        plan(store, status, args.dry_run)
     else:
         weekly(store, status, args.dry_run)
 

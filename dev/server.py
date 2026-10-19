@@ -133,8 +133,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 since = (dt.date.fromisoformat(today()) - dt.timedelta(days=30)).isoformat()
                 recent = [r["distance_km"] for r in runs.values()
                           if not r["user_excluded"] and not r["flags"] and r["date"] >= since]
+                rr = sorted((r for r in runs.values() if not r["user_excluded"] and not r["flags"] and r["date"] >= since),
+                            key=lambda r: r["start"], reverse=True)
+                hrs = [r["max_hr"] for r in runs.values() if not r["user_excluded"] and r.get("max_hr")]
                 return self.send_json({"today": today(), "last_ingest": settings["last_ingest"], "months": months,
-                                       "longest_30d_km": max(recent) if recent else None})
+                                       "longest_30d_km": max(recent) if recent else None,
+                                       "recent_runs": [{k: r[k] for k in ("date", "start", "distance_km", "moving_s", "pace_s")}
+                                                       for r in rr],
+                                       "max_hr": max(hrs) if hrs else None})
             if path == "/api/internal/notified":
                 if method == "GET":
                     return self.send_json(settings["notified"])

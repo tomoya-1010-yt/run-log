@@ -6,6 +6,10 @@ on:
     - cron: "0 22 * * *"
     # 予備: 8:00 JST。定期実行はまれに丸ごと飛ばされるため。送信済みの通知は送らない
     - cron: "0 23 * * *"
+    # 毎日 18:00 JST (= 9:00 UTC)。今日のおすすめ (今日もう走っていれば送らない)
+    - cron: "0 9 * * *"
+    # 予備: 18:30 JST。送信済みなら何もしない
+    - cron: "30 9 * * *"
     # 日曜 22:30 JST (= 13:30 UTC)。今月の目標から遅れていればお知らせ
     - cron: "30 13 * * 0"
     # 予備: 日曜 23:15 JST
@@ -15,7 +19,7 @@ on:
       command:
         description: "実行する通知"
         type: choice
-        options: [daily, weekly]
+        options: [daily, weekly, plan]
         default: daily
       dry_run:
         description: "通知せず、送る内容を表示するだけ"
@@ -51,9 +55,10 @@ jobs:
           COMMAND: ${{ inputs.command }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          # 日曜の夜の2つは weekly、それ以外 (毎朝) は daily
+          # 日曜の夜の2つは weekly、毎日18時台の2つは plan、それ以外 (毎朝) は daily
           case "$SCHEDULE" in
             "30 13 * * 0"|"15 14 * * 0") COMMAND=weekly ;;
+            "0 9 * * *"|"30 9 * * *") COMMAND=plan ;;
             "") ;;  # 手動実行は選んだもの
             *) COMMAND=daily ;;
           esac
