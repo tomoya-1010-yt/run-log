@@ -135,7 +135,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 since = (dt.date.fromisoformat(today()) - dt.timedelta(days=30)).isoformat()
                 recent = [r["distance_km"] for r in runs.values()
                           if not r["user_excluded"] and not r["flags"] and r["date"] >= since]
-                rr = sorted((r for r in runs.values() if not r["user_excluded"] and not r["flags"] and r["date"] >= since),
+                since56 = (dt.date.fromisoformat(today()) - dt.timedelta(days=56)).isoformat()
+                rr = sorted((r for r in runs.values() if not r["user_excluded"] and not r["flags"] and r["date"] >= since56),
                             key=lambda r: r["start"], reverse=True)
                 hrs = [r["max_hr"] for r in runs.values() if not r["user_excluded"] and r.get("max_hr")]
                 return self.send_json({"today": today(), "last_ingest": settings["last_ingest"], "months": months,

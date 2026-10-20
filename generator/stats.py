@@ -12,6 +12,11 @@ HARD_HR = 0.85        # これを超えたらきつい強度
 LONG_RUN_LIMIT = 1.1  # 1回の距離の上限 (過去30日の最長に対する倍率, R3)
 SIMILAR_RANGE = 0.25  # 「似た距離のラン」とみなす幅 (±25%)
 DEFAULT_MAX_HR = 185
+# 走らない日の自宅の筋トレ (器具なし・15分ほど, R7)。web/app.js と generator/main.py の STRENGTH と同じ内容にする
+STRENGTH = [
+    ["スクワット 15回 × 3", "プランク 30秒 × 3", "カーフレイズ 20回 × 2"],
+    ["ランジ 左右10回 × 2", "サイドプランク 左右20秒 × 2", "ヒップリフト 15回 × 3"],
+]
 
 
 def day(s):
@@ -88,8 +93,42 @@ def hr_drift(hr):
     return {"first_third_avg": round(first), "last_third_avg": round(last), "rise": round(last - first)}
 
 
-def run_facts(run, all_runs):
-    """走るたびのコメント用の数字"""
+def run_history(run, all_runs, metrics):
+    """そのランより前の履歴 (コメントを総合的にするため)"""
+    hr_max = max_hr(all_runs)
+    monday = shift(run["date"], -day(run["date"]).weekday())
+    weeks = []
+    for i in range(6, -1, -1):  # 6週前〜今週 (今週はこのランの日まで)
+        start = shift(monday, -7 * i)
+        end = run["date"] if i == 0 else shift(start, 6)
+        rs = [r for r in usable(all_runs) if start <= r["date"] <= end]
+        weeks.append({"week_of": start, "runs": len(rs), "km": round(sum(r["distance_km"] for r in rs), 1)})
+    past6 = weeks[:-1]
+    before = [r for r in trusted(all_runs) if r["start"] < run["start"]]
+    similar = [r for r in before if r.get("pace_s")
+               and abs(r["distance_km"] - run["distance_km"]) <= run["distance_km"] * SIMILAR_RANGE][-6:]
+    d30, d90 = shift(run["date"], -30), shift(run["date"], -90)
+    recent = [r["pace_s"] for r in before if r["date"] >= d30 and r.get("pace_s")]
+    older = [r["pace_s"] for r in before if d90 <= r["date"] < d30 and r.get("pace_s")]
+    easy_recent = [r for r in before if r["date"] >= d30 and r.get("avg_hr")]
+    return {
+        "weekly_last_6_weeks_and_this_week": weeks,
+        "avg_km_per_week_last_6": round(statistics.mean(w["km"] for w in past6), 1),
+        "avg_runs_per_week_last_6": round(statistics.mean(w["runs"] for w in past6), 1),
+        "weeks_with_2_or_more_runs_last_6": sum(1 for w in past6 if w["runs"] >= 2),  # 続けられているか
+        "similar_runs_recent": [{"date": r["date"], "km": round(r["distance_km"], 1), "pace": fmt_pace(r["pace_s"]),
+                                 "avg_hr": r.get("avg_hr")} for r in similar],  # 古い順
+        "median_pace_last_30_days": fmt_pace(statistics.median(recent)) if recent else None,
+        "median_pace_31_to_90_days_ago": fmt_pace(statistics.median(older)) if older else None,
+        "easy_runs_share_last_30_days_pct": round(sum(1 for r in easy_recent if r["avg_hr"] / hr_max < EASY_HR)
+                                                  / len(easy_recent) * 100) if easy_recent else None,
+        "vo2_max": metric_trend(metrics or [], "vo2_max", run["date"], 7, 28),
+        "resting_heart_rate": metric_trend(metrics or [], "resting_heart_rate", run["date"]),
+    }
+
+
+def run_facts(run, all_runs, metrics=None):
+    """走るたびのコメント用の数字 (そのランと、それまでの履歴)"""
     hr_max = max_hr(all_runs)
     before = [r for r in trusted(all_runs) if r["start"] < run["start"]]
     prev = before[-1] if before else None
@@ -132,6 +171,7 @@ def run_facts(run, all_runs):
         "needs_check": [f["text"] for f in run.get("flags") or []],  # 要確認の理由 (あれば数字をあてにしない)
         "notes": run.get("notes") or [],
         "excluded_by_user": bool(run.get("user_excluded")),
+        "history": run_history(run, all_runs, metrics),
     }
 
 
@@ -220,4 +260,6 @@ def weekly_facts(runs, metrics, today, goals=None):
             "hard_sessions_max": 1 if (statistics.median(weeks_with_runs) if weeks_with_runs else 0) >= 3 else 0,  # R1・R6
             "easy_hr_max": round(hr_max * EASY_HR),
         },
+        # 走らない日の筋トレ (R7)。ホームの「今日のおすすめ」と同じメニュー
+        "strength_menus": {"A": STRENGTH[0], "B": STRENGTH[1]},
     }

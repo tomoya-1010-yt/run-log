@@ -85,28 +85,56 @@ def behind_message(months, today, longest_30d_km):
 EASY_HR = 0.75  # 楽な強度の上限 (最大心拍に対する割合。docs/coach-guidelines.md の R1)
 
 
+# 走らない日の自宅の筋トレ (器具なし・15分ほど, R7)。web/app.js の STRENGTH と同じ内容にする
+STRENGTH = stats.STRENGTH
+STRENGTH_LIGHT = ["プランク 30秒 × 2", "股関節・ふくらはぎのストレッチ 5分"]
+
+
+def strength_for(date, usual):
+    """その日の筋トレメニュー。その週の「走らない曜日」の何番目かで A と B を交互にする (web/app.js と同じ選び方)"""
+    off = [w for w in range(7) if w not in usual]
+    return STRENGTH[(off.index(date.weekday()) if date.weekday() in off else 0) % 2]
+
+
+def usual_weekdays(runs, today):
+    """よく走る曜日 (直近8週で2回以上。記録が4回未満なら None)。0 = 月曜"""
+    since = (today - dt.timedelta(days=56)).isoformat()
+    recent = [r for r in runs if since <= r["date"] < today.isoformat()]
+    if len(recent) < 4:
+        return None
+    count = {}
+    for r in recent:
+        w = dt.date.fromisoformat(r["date"]).weekday()
+        count[w] = count.get(w, 0) + 1
+    return {w for w, n in count.items() if n >= 2}
+
+
 def today_plan(status):
-    """今日のおすすめ (title, note)。web/app.js の todayPlan と同じ判定。今日もう走っていれば None。
-    内部 API は直近30日のランしか返さないので、それより前に最後に走った人は「しばらく空いた」として扱う"""
+    """今日のおすすめ (title, note, menu)。web/app.js の todayPlan と同じ判定。今日もう走っていれば None。
+    内部 API は直近56日のランしか返さないので、それより前に最後に走った人は「しばらく空いた」として扱う"""
     today = dt.date.fromisoformat(status["today"])
     runs = status.get("recent_runs") or []
     easy_hr = round((status.get("max_hr") or 185) * EASY_HR)
     if not runs:
         if any(m.get("runs") for m in status["months"].values()):
-            return "短めに 20分", "しばらく空いたので、楽なペースで体を慣らしましょう。"
-        return "まずは 20分", "会話できるくらいの楽なペースで。歩きを混ぜても大丈夫です。"
+            return "短めに 20分", "しばらく空いたので、楽なペースで体を慣らしましょう。", None
+        return "まずは 20分", "会話できるくらいの楽なペースで。歩きを混ぜても大丈夫です。", None
     last = runs[0]
     gap = (today - dt.date.fromisoformat(last["date"])).days
     if gap <= 0:
         return None
     if gap >= 14:
-        return "短めに 20分", f"{gap}日ぶりなので、楽なペースで体を慣らしましょう。"
-    longest = max(r["distance_km"] for r in runs)
-    if gap == 1 and last["distance_km"] >= longest * 0.9:
-        return "休養日", "昨日は長めに走ったので、今日は休むか散歩くらいに。"
+        return "短めに 20分", f"{gap}日ぶりなので、楽なペースで体を慣らしましょう。", None
+    since30 = (today - dt.timedelta(days=30)).isoformat()
+    longest = max([r["distance_km"] for r in runs if r["date"] >= since30], default=0)
+    if gap == 1 and longest and last["distance_km"] >= longest * 0.9:
+        return "休養日", "昨日は長めに走ったので、走らずに軽い体幹とストレッチだけに。", STRENGTH_LIGHT
+    usual = usual_weekdays(runs, today)
+    if usual is not None and gap < 4 and today.weekday() not in usual:
+        return "筋トレ 15分", "今日は走らない日。週2回の筋トレで、走る効率が上がります（根拠 A）。", strength_for(today, usual)
     times = sorted(r["moving_s"] for r in runs[:5])
     minutes = max(20, round(times[len(times) // 2] / 60 / 5) * 5)
-    return f"楽に {minutes}分", f"前回から{gap}日空き。心拍{easy_hr}以下を目安に。"
+    return f"楽に {minutes}分", f"前回から{gap}日空き。心拍{easy_hr}以下を目安に。", None
 
 
 def send_once(store, key, title, body, dry_run):
@@ -154,8 +182,9 @@ def plan(store, status, dry_run):
     if not p:
         print("今日はもう走っているので通知しません")
         return
-    title, note = p
-    send_once(store, f"plan-{status['today']}", f"今日のおすすめ：{title}", note, dry_run)
+    title, note, menu = p
+    body = note + ("\n" + " / ".join(menu) if menu else "")
+    send_once(store, f"plan-{status['today']}", f"今日のおすすめ：{title}", body, dry_run)
 
 
 def pending_comments(runs, today):
@@ -176,8 +205,9 @@ def comments(store, status, args):
     if not pending:
         print("コメント待ちのランはありません")
         return
+    metrics = store.metrics(stats.shift(today, -60))
     for run in sorted(pending, key=lambda r: r["start"])[:COMMENTS_PER_RUN]:
-        facts = stats.run_facts(run, runs)
+        facts = stats.run_facts(run, runs, metrics)
         print(f"{run['date']} {run['distance_km']}km のコメントを作ります")
         out = llm.run_comment(facts)
         comment = {**out, "facts": facts, "created_at": dt.datetime.now(dt.timezone.utc).isoformat()}

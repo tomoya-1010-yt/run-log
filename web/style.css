@@ -331,3 +331,5 @@ details.table th { color: var(--muted); border-top: none; font-size: 12px; }
 .plan-list span { font-size: 15px; font-weight: 600; }
 .plan-list small { display: block; font-size: 12px; font-weight: 400; color: var(--sub); }
 .report-head .month { margin: 0; font-size: 13px; color: var(--muted); }
+.plan-menu { margin: 8px 0 0; padding-left: 1.2em; font-size: 14px; font-weight: 600; }
+.plan-menu li + li { margin-top: 2px; }

@@ -167,7 +167,38 @@ const EASY_HR = 0.75; // 楽な強度の上限 (最大心拍に対する割合�
 // 記録がなければ 185 とみなす (R2)
 const maxHr = () => Math.max(0, ...counted().map((r) => r.max_hr || 0)) || 185;
 
-// 今日のおすすめ。第2弾の AI ができるまでは、前回のランからの間隔と距離だけで決める簡単なルール
+// 走らない日の自宅の筋トレ (器具なし・15分ほど)。R7: 週2回の筋トレでランニングエコノミーが 2〜8% 改善 (根拠 A)。
+// generator/main.py の STRENGTH と同じ内容にする
+const STRENGTH = [
+  ["スクワット 15回 × 3", "プランク 30秒 × 3", "カーフレイズ 20回 × 2"],
+  ["ランジ 左右10回 × 2", "サイドプランク 左右20秒 × 2", "ヒップリフト 15回 × 3"],
+];
+const STRENGTH_LIGHT = ["プランク 30秒 × 2", "股関節・ふくらはぎのストレッチ 5分"];
+
+// 曜日 (0 = 月曜 … 6 = 日曜)
+const weekdayOf = (date) => (new Date(date + "T00:00:00Z").getUTCDay() + 6) % 7;
+
+// その日の筋トレメニュー。その週の「走らない曜日」の何番目かで A と B を交互にする (水・金でも違うメニューになる)
+function strengthFor(date, usual) {
+  const off = [0, 1, 2, 3, 4, 5, 6].filter((w) => !usual.has(w));
+  return STRENGTH[Math.max(0, off.indexOf(weekdayOf(date))) % 2];
+}
+
+// よく走る曜日 (直近8週で2回以上走った曜日、0 = 月曜。記録が4回未満なら分からないので null)
+function usualWeekdays(list) {
+  const since = shiftDate(today, -56);
+  const recent = list.filter((r) => r.date >= since && r.date < today);
+  if (recent.length < 4) return null;
+  const count = {};
+  for (const r of recent) {
+    const w = weekdayOf(r.date);
+    count[w] = (count[w] || 0) + 1;
+  }
+  return new Set(Object.keys(count).filter((w) => count[w] >= 2).map(Number));
+}
+
+// 今日のおすすめ。前回のランからの間隔・距離と、よく走る曜日で決める簡単なルール。
+// generator/main.py の today_plan と同じ判定にする
 function todayPlan() {
   const mine = counted().filter((r) => !r.flags?.length);
   const last = mine[0];
@@ -180,7 +211,11 @@ function todayPlan() {
   const since = shiftDate(today, -30);
   const longest = Math.max(0, ...mine.filter((r) => r.date >= since).map((r) => r.distance_km));
   if (gap === 1 && longest && last.distance_km >= longest * 0.9)
-    return { title: "休養日", note: "昨日は長めに走ったので、今日は休むか散歩くらいに。" };
+    return { title: "休養日", note: "昨日は長めに走ったので、走らずに軽い体幹とストレッチだけに。", menu: STRENGTH_LIGHT };
+  // ふだん走らない曜日は自宅で筋トレ (ただし4日以上空いていたら走るほうを優先)
+  const usual = usualWeekdays(mine);
+  if (usual && gap < 4 && !usual.has(weekdayOf(today)))
+    return { title: "筋トレ 15分", note: "今日は走らない日。週2回の筋トレで、走る効率が上がります（根拠 A）。", menu: strengthFor(today, usual) };
   // ふだんの時間 (直近5回の動いていた時間の中央値) を5分単位で
   const times = mine.slice(0, 5).map((r) => r.moving_s).sort((a, b) => a - b);
   const min = Math.max(20, Math.round(times[Math.floor(times.length / 2)] / 60 / 5) * 5);
@@ -208,7 +243,8 @@ function renderHome() {
   const plan = todayPlan();
 
   const planHtml = `<div class="card plan-card"><p class="plan-label">今日のおすすめ</p>
-    <p class="plan-title">${esc(plan.title)}</p><p class="plan-note">${esc(plan.note)}</p></div>`;
+    <p class="plan-title">${esc(plan.title)}</p><p class="plan-note">${esc(plan.note)}</p>
+    ${plan.menu ? `<ul class="plan-menu">${plan.menu.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}</div>`;
 
   let goalHtml;
   if (goal) {

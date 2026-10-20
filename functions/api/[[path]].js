@@ -213,9 +213,10 @@ async function internalStatus(env) {
   const since = jstDate(Date.now() - 30 * 24 * 3600 * 1000);
   const longest = await env.DB.prepare(`SELECT MAX(distance_km) AS km FROM runs
     WHERE user_excluded = 0 AND flagged = 0 AND date >= ?`).bind(since).first();
-  // 今日のおすすめの通知用: 直近30日の、距離があてになるラン (新しい順) と、記録上の最大心拍
+  // 今日のおすすめの通知用: 直近56日 (よく走る曜日を出すため8週分) の、距離があてになるラン (新しい順) と、記録上の最大心拍
+  const since56 = jstDate(Date.now() - 56 * 24 * 3600 * 1000);
   const recent = (await env.DB.prepare(`SELECT body FROM runs WHERE user_excluded = 0 AND flagged = 0 AND date >= ?
-    ORDER BY date DESC`).bind(since).all()).results.map((r) => {
+    ORDER BY date DESC`).bind(since56).all()).results.map((r) => {
     const b = JSON.parse(r.body);
     return { date: b.date, start: b.start, distance_km: b.distance_km, moving_s: b.moving_s, pace_s: b.pace_s };
   }).sort((a, b) => b.start.localeCompare(a.start));
