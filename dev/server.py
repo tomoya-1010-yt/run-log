@@ -190,7 +190,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if route == "GET /api/state":
             lst = sorted(runs.values(), key=lambda r: (r["date"], r["id"]), reverse=True)
             return self.send_json({"today": today(), "goals": settings["goals"], "last_ingest": settings["last_ingest"],
-                                   "runs": [light(r) for r in lst], "vapidPublicKey": None})
+                                   "runs": [light(r) for r in lst],
+                                   "latest_comment": next(({"run_id": r["id"], "comment": comments.get(r["id"])}
+                                                           for r in sorted(runs.values(), key=lambda r: r["start"], reverse=True)
+                                                           if not r["user_excluded"]), None),
+                                   "vapidPublicKey": None})
         if route == "PUT /api/goal":
             b = self.body()
             if b.get("km") is None:

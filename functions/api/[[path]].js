@@ -129,8 +129,18 @@ async function state(env) {
     goals: await setting(env, "goals", {}),
     last_ingest: await setting(env, "last_ingest"),
     runs: rows.map(light),
+    latest_comment: await latestComment(env),
     vapidPublicKey: env.VAPID_PUBLIC_KEY || null,
   });
+}
+
+// いちばん新しいランの AI コメント (ホームの「今日のランの総評」用)。まだなければ comment は null
+async function latestComment(env) {
+  const row = await env.DB.prepare(`SELECT r.id, r.body AS run, c.body AS comment FROM runs r
+    LEFT JOIN comments c ON c.run_id = r.id WHERE r.user_excluded = 0
+    ORDER BY json_extract(r.body, '$.start') DESC LIMIT 1`).first();
+  if (!row) return null;
+  return { run_id: row.id, comment: row.comment ? JSON.parse(row.comment) : null };
 }
 
 async function runDetail(env, id) {

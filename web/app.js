@@ -13,6 +13,7 @@ let goals = {};
 let lastIngest = null;
 let runs = [];         // 一覧用の軽い形 (新しい順)
 let vapidPublicKey = null;
+let latestComment = null; // いちばん新しいランの AI コメント { run_id, comment }
 const details = new Map(); // ランの詳細 (地図・1km ごと) のキャッシュ
 
 // ---------- 表示の部品 ----------
@@ -148,18 +149,17 @@ function staleCard() {
 
 // ---------- ホーム ----------
 
-const LONG_RUN_LIMIT = 1.1; // 次のロング走は、過去30日の最長のこの倍まで (docs/coach-guidelines.md の R3)
 
-// 次のロング走の安全な上限。「要確認」と「集計から外す」のランは距離があてにならないので除く
-function longRunLine() {
-  const since = shiftDate(today, -30);
-  const longest = Math.max(0, ...counted().filter((r) => r.date >= since && !r.flags?.length).map((r) => r.distance_km));
-  if (!longest) return `<li><span>この30日ほど走っていません</span><b>短い距離から再開</b></li>`;
-  return `<li><span>次のロング走の上限<small>過去30日の最長 ${fmtKm(longest)} km × 1.1</small></span>
-    <b>${fmtKm(longest * LONG_RUN_LIMIT)} km まで</b></li>`;
+// いちばん新しいランの総評 (AI のコメント)。ホームの目標カードに出す
+function summaryLine() {
+  const r = latestComment && runs.find((x) => x.id === latestComment.run_id);
+  if (!r) return "";
+  const label = r.date === today ? "今日のランの総評" : `前回のラン（${md(r.date)}）の総評`;
+  const c = latestComment.comment;
+  return `<li class="summary-line" data-run="${esc(r.id)}"><span>${label} <small>${fmtKm(r.distance_km, 2)} km・${fmtPace(r.pace_s)}/km</small></span>
+    ${c ? `<p>${esc(c.comment)} ${evidence(c.evidence)}</p>` : `<p class="hint" style="margin:0">AI の総評は走ってから1時間ほどで届きます（7〜23時）。</p>`}</li>`;
 }
 
-const LONG_RUN_HINT = `<p class="hint">1回の距離が過去30日の最長の1.1倍を超えると、けがのリスクが上がります。遅れていても詰め込まずに。</p>`;
 
 const EASY_HR = 0.75; // 楽な強度の上限 (最大心拍に対する割合。docs/coach-guidelines.md の R1)
 
@@ -260,12 +260,12 @@ function renderHome() {
         ? `<li><span>目標達成！</span><b class="ahead">+${fmtKm(m.km - goal)} km</b></li>`
         : `<li><span>今日までの目安 ${fmtKm(expected)} km</span>
            <b class="${diff >= 0 ? "ahead" : "behind"}">${diff >= 0 ? `+${fmtKm(diff)} km 先行` : `${fmtKm(-diff)} km 遅れ`}</b></li>`}
-        ${longRunLine()}</ul>${LONG_RUN_HINT}
+        ${summaryLine()}</ul>
     </div>`;
   } else {
     goalHtml = `<div class="card goal-card">
       <div class="goal-head"><span>${Number(month.slice(5))}月の距離</span><b>${fmtKm(m.km)} km</b></div>
-      <ul class="pace-guide">${longRunLine()}</ul>${LONG_RUN_HINT}
+      <ul class="pace-guide">${summaryLine()}</ul>
       <button class="link-btn" data-go="settings">月の目標を決める ›</button></div>`;
   }
 
@@ -689,6 +689,7 @@ function guard(promise) {
 async function loadState() {
   const s = await api("/api/state");
   ({ today, goals, vapidPublicKey } = s);
+  latestComment = s.latest_comment;
   lastIngest = s.last_ingest;
   runs = s.runs.sort((a, b) => b.start.localeCompare(a.start)); // 同じ日に2回走っても新しい順
 }

@@ -1,4 +1,4 @@
-const CACHE = "run-v6";
+const CACHE = "run-v7";
 const SHELL = ["./", "index.html", "app.js", "charts.js", "style.css", "manifest.webmanifest", "icon.svg"];
 
 self.addEventListener("install", (e) => {
