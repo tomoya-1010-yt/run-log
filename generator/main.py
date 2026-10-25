@@ -131,7 +131,7 @@ def today_plan(status):
         return "休養日", "昨日は長めに走ったので、走らずに軽い体幹とストレッチだけに。", STRENGTH_LIGHT
     usual = usual_weekdays(runs, today)
     if usual is not None and gap < 4 and today.weekday() not in usual:
-        return "筋トレ 15分", "今日は走らない日。週2回の筋トレで、走る効率が上がります（根拠 A）。", strength_for(today, usual)
+        return "筋トレ 15分", "今日は走らない日。週2回の筋トレで、走る効率が上がります。", strength_for(today, usual)
     times = sorted(r["moving_s"] for r in runs[:5])
     minutes = max(20, round(times[len(times) // 2] / 60 / 5) * 5)
     return f"楽に {minutes}分", f"前回から{gap}日空き。心拍{easy_hr}以下を目安に。", None

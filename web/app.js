@@ -215,7 +215,7 @@ function todayPlan() {
   // ふだん走らない曜日は自宅で筋トレ (ただし4日以上空いていたら走るほうを優先)
   const usual = usualWeekdays(mine);
   if (usual && gap < 4 && !usual.has(weekdayOf(today)))
-    return { title: "筋トレ 15分", note: "今日は走らない日。週2回の筋トレで、走る効率が上がります（根拠 A）。", menu: strengthFor(today, usual) };
+    return { title: "筋トレ 15分", note: "今日は走らない日。週2回の筋トレで、走る効率が上がります。", menu: strengthFor(today, usual) };
   // ふだんの時間 (直近5回の動いていた時間の中央値) を5分単位で
   const times = mine.slice(0, 5).map((r) => r.moving_s).sort((a, b) => a - b);
   const min = Math.max(20, Math.round(times[Math.floor(times.length / 2)] / 60 / 5) * 5);
@@ -426,9 +426,8 @@ async function renderRun(id) {
 
 // ---------- AI ----------
 
-// 根拠の強さの印 (docs/coach-guidelines.md)
-const EVIDENCE_LABEL = { A: "根拠 A", B: "根拠 B", C: "根拠 C", "本人の記録": "記録から" };
-const evidence = (e) => (e ? `<span class="ev ev-${e === "本人の記録" ? "own" : e}">${esc(EVIDENCE_LABEL[e] || e)}</span>` : "");
+// 根拠の強さ (docs/coach-guidelines.md) の印は分かりにくいので画面には出さない (データとしては残し、AI の言い方の調整に使う)
+const evidence = () => "";
 
 function commentHtml(c) {
   if (!c) return `<div class="card ai-card pending"><p class="ai-label">AI のコメント</p>
