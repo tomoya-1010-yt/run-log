@@ -150,6 +150,17 @@ function staleCard() {
 // ---------- ホーム ----------
 
 
+// AI が提案した次のラン (ランの何日後・種類・距離・時間・心拍)。古いコメントには付いていない
+function nextRunHtml(n, runDate) {
+  if (!n || !n.days_after) return "";
+  const date = shiftDate(runDate, n.days_after);
+  if (date < today) return ""; // もう過ぎた提案は出さない
+  const when = date === today ? "今日" : date === shiftDate(today, 1) ? "明日" : `${md(date)}（${WEEKDAYS[new Date(date + "T00:00:00Z").getUTCDay()]}）`;
+  const main = [`${when}・${esc(n.type)}`, n.distance_km != null ? `${fmtKm(n.distance_km)} km` : "",
+    n.minutes != null ? `${n.minutes}分` : "", n.hr_max != null ? `心拍${n.hr_max}以下` : ""].filter(Boolean).join("・");
+  return `<div class="next-run"><span>次のおすすめ</span><b>${main}</b>${n.note ? `<small>${esc(n.note)}</small>` : ""}</div>`;
+}
+
 // いちばん新しいランの総評 (AI のコメント)。ホームの目標カードに出す
 function summaryLine() {
   const r = latestComment && runs.find((x) => x.id === latestComment.run_id);
@@ -157,7 +168,7 @@ function summaryLine() {
   const label = r.date === today ? "今日のランの総評" : `前回のラン（${md(r.date)}）の総評`;
   const c = latestComment.comment;
   return `<li class="summary-line" data-run="${esc(r.id)}"><span>${label} <small>${fmtKm(r.distance_km, 2)} km・${fmtPace(r.pace_s)}/km</small></span>
-    ${c ? `<p>${esc(c.comment)} ${evidence(c.evidence)}</p>` : `<p class="hint" style="margin:0">AI の総評は走ってから1時間ほどで届きます（7〜23時）。</p>`}</li>`;
+    ${c ? `<p>${esc(c.comment)} ${evidence(c.evidence)}</p>${nextRunHtml(c.next_run, r.date)}` : `<p class="hint" style="margin:0">AI の総評は走ってから1時間ほどで届きます（7〜23時）。</p>`}</li>`;
 }
 
 
@@ -388,7 +399,7 @@ async function renderRun(id) {
     : "";
   const notes = r.notes?.length ? `<div class="card info">${r.notes.map((n) => `<p>${esc(n)}</p>`).join("")}</div>` : "";
   main.innerHTML = `<div class="map" id="map"></div>
-    ${commentHtml(d.comment)}${flags}${notes}
+    ${commentHtml(d.comment, r.date)}${flags}${notes}
     <div class="tiles">
       ${tile("距離", fmtKm(r.distance_km, 2), "km")}
       ${tile("ペース", fmtPace(r.pace_s), "/km")}
@@ -429,11 +440,11 @@ async function renderRun(id) {
 // 根拠の強さ (docs/coach-guidelines.md) の印は分かりにくいので画面には出さない (データとしては残し、AI の言い方の調整に使う)
 const evidence = () => "";
 
-function commentHtml(c) {
+function commentHtml(c, runDate) {
   if (!c) return `<div class="card ai-card pending"><p class="ai-label">AI のコメント</p>
     <p class="hint" style="margin:0">走ってから1時間ほどで届きます（7〜23時）。</p></div>`;
   return `<div class="card ai-card"><p class="ai-label">AI のコメント ${evidence(c.evidence)}</p>
-    <p class="ai-text">${esc(c.comment)}</p></div>`;
+    <p class="ai-text">${esc(c.comment)}</p>${nextRunHtml(c.next_run, runDate)}</div>`;
 }
 
 let reportData = null;

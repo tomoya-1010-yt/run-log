@@ -44,6 +44,8 @@ def _stub(schema):
     """ローカル確認用 (RUN_LLM_STUB=1): Claude を呼ばず、決まった文章を返す"""
     if schema is COMMENT_SCHEMA:
         return {"comment": "（試験用）似た距離の過去のランより速く走れています。明日は楽なジョグか休養にしましょう。",
+                "next_run": {"days_after": 1, "type": "楽に", "distance_km": 6.0, "minutes": 40, "hr_max": 143,
+                             "note": "会話できるペースで"},
                 "evidence": "B", "rules": ["R1"]}
     return {"headline": "（試験用）安定して走れた1週間", "summary": "先週は3回・26km。前の4週の平均とほぼ同じです。",
             "good": [{"text": "3回とも同じくらいのペースで走れています。", "evidence": "本人の記録"}],
@@ -101,14 +103,29 @@ def _dump(facts):
 
 # ---------- 走るたびのコメント ----------
 
+NEXT_RUN = {
+    "type": "object",
+    "properties": {
+        "days_after": {"type": "integer", "minimum": 1, "maximum": 7},  # ランの何日後に走るか (画面で日付にする)
+        "type": {"type": "string", "enum": ["楽に", "ややきつめ", "ロング"]},
+        "distance_km": {"type": ["number", "null"]},
+        "minutes": {"type": ["integer", "null"]},
+        "hr_max": {"type": ["integer", "null"]},  # この心拍以下で (ややきつめのときは上限)
+        "note": {"type": "string"},          # ひとこと (例:「後半もペースを落とさない」)
+    },
+    "required": ["days_after", "type", "distance_km", "minutes", "hr_max", "note"],
+    "additionalProperties": False,
+}
+
 COMMENT_SCHEMA = {
     "type": "object",
     "properties": {
         "comment": {"type": "string"},
+        "next_run": NEXT_RUN,
         "evidence": {"type": "string", "enum": EVIDENCE},
         "rules": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["comment", "evidence", "rules"],
+    "required": ["comment", "next_run", "evidence", "rules"],
     "additionalProperties": False,
 }
 
@@ -134,6 +151,15 @@ VO2 Max・安静時心拍の変化) を踏まえて、総合的に評価して�
 - intensity が「きつい」で、last_7_days.runs が多いときは、次は楽な強度にするよう添える (R1)。
 - 体調の不安 (胸の痛み・異常な息切れなど) を示す数字はないので、医療の話はしない。
 - comment の本文に「根拠 A」「R1」のような印やルール番号は書かない (分かりにくいため)。
+- next_run: 次のランの具体的な提案。comment の最後の提案と矛盾させない。
+  - days_after: このランの何日後に走るか (1 = 翌日)。休むべきなら、休んだあとに走る日にする。
+  - type: 「楽に」がふつう。ややきつめはここ1週間にきつい練習がなく、続けられているときだけ (R1・R6)。
+    ロングは週1回まで。体調 (安静時心拍の上昇など) や要確認が気になるときは「楽に」。
+  - distance_km は next_run_limits.max_distance_km を超えない (R3)。ふだんの距離 (last_7_days や history) を目安に。
+  - minutes は usual_minutes 前後を目安に、distance_km と usual_pace に合わせる。
+  - hr_max: 楽なら next_run_limits.easy_hr_max、ややきつめなら hard_hr_range の上の値。
+  - 休んでから走るときは、days_after をその日にし、type は走る内容にする (休む日の過ごし方は note に)。
+  - note は25字以内。
 - evidence: 提案の根拠の強さ。指針のルールに基づく提案なら A/B/C、記録の事実だけなら「本人の記録」。
 - rules: 使った指針のルール番号 (例: ["R1", "R3"])。使っていなければ空。
 """

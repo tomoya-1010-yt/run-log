@@ -172,6 +172,25 @@ def run_facts(run, all_runs, metrics=None):
         "notes": run.get("notes") or [],
         "excluded_by_user": bool(run.get("user_excluded")),
         "history": run_history(run, all_runs, metrics),
+        "next_run_limits": next_run_limits(run, all_runs),
+    }
+
+
+def next_run_limits(run, all_runs):
+    """次のランの提案に使う上限と目安。距離の上限は、このランを含めた過去30日の最長 × 1.1 (R3)"""
+    hr_max = max_hr(all_runs)
+    since = shift(run["date"], -29)
+    recent = [r for r in trusted(all_runs) if since <= r["date"] <= run["date"]]
+    longest = max((r["distance_km"] for r in recent), default=None)
+    upto = [r for r in trusted(all_runs) if r["start"] <= run["start"]][-5:]
+    times = sorted(r["moving_s"] for r in upto)
+    paces = sorted(r["pace_s"] for r in upto if r.get("pace_s"))
+    return {
+        "max_distance_km": round(longest * LONG_RUN_LIMIT, 1) if longest else None,
+        "usual_minutes": round(times[len(times) // 2] / 60) if times else None,  # 直近5回の動いていた時間の中央値
+        "usual_pace": fmt_pace(paces[len(paces) // 2]) if paces else None,
+        "easy_hr_max": round(hr_max * EASY_HR),  # 楽な強度の上限 (R1)
+        "hard_hr_range": [round(hr_max * 0.85), round(hr_max * 0.92)],  # ややきつい練習をするときの目安
     }
 
 
